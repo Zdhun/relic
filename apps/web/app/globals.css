@@ -1,0 +1,28 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 3.9%;
+    --foreground: 0 0% 98%;
+  }
+}
+
+body {
+  @apply bg-terminal-bg text-terminal-text font-mono antialiased;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+}
+::-webkit-scrollbar-track {
+  @apply bg-terminal-bg;
+}
+::-webkit-scrollbar-thumb {
+  @apply bg-terminal-border rounded;
+}
+::-webkit-scrollbar-thumb:hover {
+  @apply bg-terminal-dim;
+}

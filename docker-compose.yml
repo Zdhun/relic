@@ -1,0 +1,27 @@
+
+
+services:
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - SCANNER_BASE_URL=http://scanner:8000
+    depends_on:
+      - scanner
+    networks:
+      - auditai-net
+
+  scanner:
+    build:
+      context: services/scanner
+    ports:
+      - "8000:8000"
+    networks:
+      - auditai-net
+
+networks:
+  auditai-net:
+    driver: bridge
