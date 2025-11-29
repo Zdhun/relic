@@ -7,6 +7,18 @@ export default function ResultTabs({ result }: { result: ScanResult | null }) {
 
     return (
         <div className="flex flex-col gap-6">
+            {result.scan_status === 'blocked' && (
+                <div className="bg-red-500/10 border border-red-500/50 p-4 rounded text-red-200">
+                    <div className="font-bold flex items-center gap-2">
+                        <span>🛡️ Scan status: BLOCKED BY WAF</span>
+                    </div>
+                    <p className="text-sm mt-1 opacity-90">
+                        The scanner was blocked by a security mechanism ({result.blocking_mechanism || 'WAF'}).
+                        Only limited information is available. Results below may not reflect the actual security posture of the application.
+                    </p>
+                </div>
+            )}
+
             <div className="flex justify-between items-center bg-terminal-dim/10 p-4 rounded border border-terminal-border">
                 <div>
                     <div className="text-sm text-terminal-dim">Target</div>
@@ -16,7 +28,8 @@ export default function ResultTabs({ result }: { result: ScanResult | null }) {
                     <div className="text-sm text-terminal-dim">Grade</div>
                     <div className={`text-4xl font-bold ${result.grade === 'A' ? 'text-green-500' :
                         result.grade === 'B' ? 'text-blue-500' :
-                            result.grade === 'C' ? 'text-yellow-500' : 'text-red-500'
+                            result.grade === 'C' ? 'text-yellow-500' :
+                                result.grade === 'N/A' ? 'text-gray-500' : 'text-red-500'
                         }`}>{result.grade}</div>
                 </div>
             </div>

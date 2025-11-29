@@ -1,0 +1,90 @@
+import ssl
+import socket
+from datetime import datetime
+from typing import List, Optional, Dict, Any, Dict, Any
+from .models import Finding
+
+def check_tls(hostname: str, port: int = 443) -> tuple[List[Finding], Optional[Dict[str, Any]]]:
+    """
+    Checks for TLS configuration issues.
+    Returns a list of findings and a dictionary with raw certificate info.
+    """
+    findings = []
+    cert_info = None
+    
+    context = ssl.create_default_context()
+    context.check_hostname = False
+    context.verify_mode = ssl.CERT_NONE # We want to connect even if cert is invalid to inspect it
+    
+    try:
+        with socket.create_connection((hostname, port), timeout=5) as sock:
+            with context.wrap_socket(sock, server_hostname=hostname) as ssock:
+                # Check TLS version
+                version = ssock.version()
+                if version in ["TLSv1", "TLSv1.1"]:
+                    findings.append(Finding(
+                        title="Obsolete TLS Protocol",
+                        severity="medium",
+                        category="tls",
+                        description=f"The server supports an obsolete TLS version: {version}.",
+                        recommendation="Disable TLS 1.0 and 1.1. Upgrade to TLS 1.2 or 1.3."
+                    ))
+    except Exception:
+        pass
+        
+    # Second pass for certificate details
+    try:
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_OPTIONAL # Allows us to get the cert if provided
+        
+        with socket.create_connection((hostname, port), timeout=5) as sock:
+            with ctx.wrap_socket(sock, server_hostname=hostname) as ssock:
+                cert = ssock.getpeercert()
+                if cert:
+                    # Extract raw info
+                    not_after = cert.get('notAfter')
+                    days_left = None
+                    
+                    if not_after:
+                        try:
+                            # Format: 'May 26 23:59:59 2025 GMT'
+                            expire_date = datetime.strptime(not_after.replace(" GMT", ""), "%b %d %H:%M:%S %Y")
+                            days_left = (expire_date - datetime.utcnow()).days
+                        except ValueError:
+                            pass
+
+                    cert_info = {
+                        "subject": dict(x[0] for x in cert.get('subject', [])),
+                        "issuer": dict(x[0] for x in cert.get('issuer', [])),
+                        "version": cert.get('version'),
+                        "serialNumber": cert.get('serialNumber'),
+                        "notBefore": cert.get('notBefore'),
+                        "notAfter": not_after,
+                        "cipher": ssock.cipher(),
+                        "protocol": ssock.version(),
+                        "days_to_expire": days_left
+                    }
+                        
+                    if days_left is not None:
+                        if days_left < 0:
+                            findings.append(Finding(
+                                title="Certificate Expired",
+                                severity="high",
+                                category="tls",
+                                description=f"The SSL certificate expired on {not_after}.",
+                                recommendation="Renew the SSL certificate immediately."
+                            ))
+                        elif days_left < 30:
+                            findings.append(Finding(
+                                title="Certificate Near Expiration",
+                                severity="medium",
+                                category="tls",
+                                description=f"The SSL certificate will expire in {days_left} days ({not_after}).",
+                                recommendation="Renew the SSL certificate soon."
+                            ))
+
+    except Exception as e:
+        pass
+
+    return findings, cert_info

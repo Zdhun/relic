@@ -20,4 +20,7 @@ export interface ScanResult {
     findings: Finding[];
     timestamp: string;
     debug_info?: Record<string, any>;
+    scan_status?: 'ok' | 'blocked' | 'partial';
+    blocking_mechanism?: string | null;
+    visibility_level?: 'good' | 'limited' | 'poor';
 }

@@ -18,8 +18,18 @@ export function useScanLogs(scanId: string | null) {
         };
 
         eventSource.addEventListener("log", (e) => {
-            const log: ScanLog = JSON.parse(e.data);
-            setLogs((prev) => [...prev, log]);
+            try {
+                const data = JSON.parse(e.data);
+                // Robust parsing with fallbacks
+                const log: ScanLog = {
+                    ts: data.timestamp || data.ts || new Date().toISOString(),
+                    level: data.level || "INFO",
+                    msg: data.message || data.msg || data.text || JSON.stringify(data)
+                };
+                setLogs((prev) => [...prev, log]);
+            } catch (err) {
+                console.error("Failed to parse log event:", err);
+            }
         });
 
         eventSource.addEventListener("done", (e) => {
