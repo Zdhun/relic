@@ -1,12 +1,32 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { ScanResult } from '@/lib/types';
-import { Download } from 'lucide-react';
+import { Download, Bot, Code } from 'lucide-react';
+import { getAiDebug } from '@/lib/api';
+import AiProviderToggle from './AiProviderToggle';
+import AiAnalysisSection from './AiAnalysisSection';
 
 export default function ResultTabs({ result }: { result: ScanResult | null }) {
+    const [showAiDebug, setShowAiDebug] = useState(false);
+    const [aiView, setAiView] = useState<any>(null);
+    const [loadingAi, setLoadingAi] = useState(false);
+    const [selectedProvider, setSelectedProvider] = useState('ollama');
+
+    useEffect(() => {
+        if (showAiDebug && !aiView && result?.scan_id) {
+            setLoadingAi(true);
+            getAiDebug(result.scan_id)
+                .then(data => setAiView(data.ai_view))
+                .catch(err => console.error("Failed to load AI view", err))
+                .finally(() => setLoadingAi(false));
+        }
+    }, [showAiDebug, result?.scan_id, aiView]);
+
     if (!result) return null;
 
     return (
         <div className="flex flex-col gap-6">
+            <AiProviderToggle selectedProvider={selectedProvider} onSelect={setSelectedProvider} />
+
             {result.scan_status === 'blocked' && (
                 <div className="bg-red-500/10 border border-red-500/50 p-4 rounded text-red-200">
                     <div className="font-bold flex items-center gap-2">
@@ -51,6 +71,8 @@ export default function ResultTabs({ result }: { result: ScanResult | null }) {
                 ))}
             </div>
 
+            <AiAnalysisSection scanId={result.scan_id} provider={selectedProvider} />
+
             <a
                 href={`/api/scan/${result.scan_id}/pdf`}
                 target="_blank"
@@ -61,10 +83,35 @@ export default function ResultTabs({ result }: { result: ScanResult | null }) {
 
             {result.debug_info && (
                 <div className="space-y-4 pt-6 border-t border-terminal-border">
-                    <h3 className="text-lg font-semibold text-terminal-accent">Debug Info (Raw Data)</h3>
-                    <div className="bg-terminal-dim/5 border border-terminal-border p-4 rounded overflow-x-auto">
+                    <div className="flex items-center justify-between">
+                        <h3 className="text-lg font-semibold text-terminal-accent">Debug Info</h3>
+                        <div className="flex gap-2">
+                            <button
+                                onClick={() => setShowAiDebug(false)}
+                                className={`px-3 py-1 rounded text-xs font-bold flex items-center gap-2 ${!showAiDebug ? 'bg-terminal-accent text-black' : 'bg-terminal-dim/20 text-terminal-dim hover:bg-terminal-dim/30'}`}
+                            >
+                                <Code size={14} /> Raw JSON
+                            </button>
+                            <button
+                                onClick={() => setShowAiDebug(true)}
+                                className={`px-3 py-1 rounded text-xs font-bold flex items-center gap-2 ${showAiDebug ? 'bg-terminal-accent text-black' : 'bg-terminal-dim/20 text-terminal-dim hover:bg-terminal-dim/30'}`}
+                            >
+                                <Bot size={14} /> AI View
+                            </button>
+                        </div>
+                    </div>
+
+                    <div className="bg-terminal-dim/5 border border-terminal-border p-4 rounded overflow-x-auto relative">
+                        {showAiDebug && loadingAi && (
+                            <div className="absolute inset-0 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+                                <span className="text-terminal-accent animate-pulse">Loading AI View...</span>
+                            </div>
+                        )}
                         <pre className="text-xs text-terminal-dim font-mono">
-                            {JSON.stringify(result.debug_info, null, 2)}
+                            {showAiDebug
+                                ? JSON.stringify(aiView || {}, null, 2)
+                                : JSON.stringify(result.debug_info, null, 2)
+                            }
                         </pre>
                     </div>
                 </div>

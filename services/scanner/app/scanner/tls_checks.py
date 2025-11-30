@@ -12,14 +12,22 @@ def check_tls(hostname: str, port: int = 443) -> tuple[List[Finding], Optional[D
     findings = []
     cert_info = None
     
-    context = ssl.create_default_context()
-    context.check_hostname = False
-    context.verify_mode = ssl.CERT_NONE # We want to connect even if cert is invalid to inspect it
+    # print(f"DEBUG: check_tls start for {hostname}:{port}")
     
     try:
-        with socket.create_connection((hostname, port), timeout=5) as sock:
-            with context.wrap_socket(sock, server_hostname=hostname) as ssock:
-                # Check TLS version
+        # Combined check: Get cert and version in one go if possible, 
+        # but we need CERT_NONE for version check sometimes if cert is bad, 
+        # and CERT_OPTIONAL/REQUIRED for getpeercert().
+        # Let's do one robust pass with CERT_OPTIONAL which allows both usually.
+        
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_OPTIONAL
+        
+        # Enforce strict timeout on socket
+        with socket.create_connection((hostname, port), timeout=3.0) as sock:
+            with ctx.wrap_socket(sock, server_hostname=hostname) as ssock:
+                # Check version
                 version = ssock.version()
                 if version in ["TLSv1", "TLSv1.1"]:
                     findings.append(Finding(
@@ -29,17 +37,8 @@ def check_tls(hostname: str, port: int = 443) -> tuple[List[Finding], Optional[D
                         description=f"The server supports an obsolete TLS version: {version}.",
                         recommendation="Disable TLS 1.0 and 1.1. Upgrade to TLS 1.2 or 1.3."
                     ))
-    except Exception:
-        pass
-        
-    # Second pass for certificate details
-    try:
-        ctx = ssl.create_default_context()
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_OPTIONAL # Allows us to get the cert if provided
-        
-        with socket.create_connection((hostname, port), timeout=5) as sock:
-            with ctx.wrap_socket(sock, server_hostname=hostname) as ssock:
+                
+                # Get cert
                 cert = ssock.getpeercert()
                 if cert:
                     # Extract raw info
@@ -62,7 +61,7 @@ def check_tls(hostname: str, port: int = 443) -> tuple[List[Finding], Optional[D
                         "notBefore": cert.get('notBefore'),
                         "notAfter": not_after,
                         "cipher": ssock.cipher(),
-                        "protocol": ssock.version(),
+                        "protocol": version,
                         "days_to_expire": days_left
                     }
                         
@@ -85,6 +84,8 @@ def check_tls(hostname: str, port: int = 443) -> tuple[List[Finding], Optional[D
                             ))
 
     except Exception as e:
+        # print(f"DEBUG: check_tls error: {e}")
         pass
-
+        
+    # print(f"DEBUG: check_tls end")
     return findings, cert_info

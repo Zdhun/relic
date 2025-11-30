@@ -22,6 +22,22 @@ class Settings(BaseModel):
     )
     BLIND_SQLI_THRESHOLD: float = Field(default=5.0, description="Threshold in seconds for time-based SQLi detection")
 
+    # Adaptive Rate Limiting & Safety
+    ADAPTIVE_RATE_LIMIT: bool = Field(default=True, description="Enable adaptive rate limiting")
+    MAX_REQUESTS_PER_MINUTE: int = Field(default=600, description="Max requests per minute per host")
+    ERROR_THRESHOLD: int = Field(default=10, description="Consecutive errors to trigger backoff")
+    LATENCY_THRESHOLD: float = Field(default=2.0, description="Latency threshold (seconds) to trigger backoff")
+    
+    # Vulnerability Detection Limits
+    XSS_PAYLOAD_LIMIT: int = Field(default=5, description="Max XSS payloads per parameter for Content pages")
+    SQLI_TIME_THRESHOLD_AVG: float = Field(default=3.0, description="Average time delay (seconds) to suspect Blind SQLi")
+
+    # AI Settings
+    OPENROUTER_API_KEY: str = Field(default="", description="OpenRouter API Key")
+    OLLAMA_BASE_URL: str = Field(default="http://localhost:11434", description="Ollama Base URL")
+    OLLAMA_MODEL: str = Field(default="Llama3.2:3b", description="Ollama Model Name")
+    OPENROUTER_MODEL: str = Field(default="x-ai/grok-4.1-fast:free", description="OpenRouter Model Name")
+
     @classmethod
     def load(cls) -> "Settings":
         # Basic env var loading for key fields
@@ -35,6 +51,18 @@ class Settings(BaseModel):
             RESPECT_ROBOTS=os.getenv("SCANNER_RESPECT_ROBOTS", "false").lower() == "true",
             CRAWL_SCOPE=os.getenv("SCANNER_CRAWL_SCOPE", "subdomains"),
             BLIND_SQLI_THRESHOLD=float(os.getenv("SCANNER_BLIND_SQLI_THRESHOLD", 5.0)),
+            ADAPTIVE_RATE_LIMIT=os.getenv("SCANNER_ADAPTIVE_RATE_LIMIT", "true").lower() == "true",
+            MAX_REQUESTS_PER_MINUTE=int(os.getenv("SCANNER_MAX_REQUESTS_PER_MINUTE", 600)),
+            ERROR_THRESHOLD=int(os.getenv("SCANNER_ERROR_THRESHOLD", 10)),
+            LATENCY_THRESHOLD=float(os.getenv("SCANNER_LATENCY_THRESHOLD", 2.0)),
+            XSS_PAYLOAD_LIMIT=int(os.getenv("SCANNER_XSS_PAYLOAD_LIMIT", 5)),
+            SQLI_TIME_THRESHOLD_AVG=float(os.getenv("SCANNER_SQLI_TIME_THRESHOLD_AVG", 3.0)),
+            
+            # AI Settings
+            OPENROUTER_API_KEY=os.getenv("OPENROUTER_API_KEY", ""),
+            OLLAMA_BASE_URL=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
+            OLLAMA_MODEL=os.getenv("OLLAMA_MODEL", "gpt-oss:20b"),
+            OPENROUTER_MODEL=os.getenv("OPENROUTER_MODEL", "x-ai/grok-4.1-fast:free"),
         )
 
 settings = Settings.load()

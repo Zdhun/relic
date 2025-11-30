@@ -73,7 +73,7 @@ async def scan_single_port(ip: str, port: int, log_callback: Optional[Callable[[
         # Close connection
         writer.close()
         try:
-            await writer.wait_closed()
+            await asyncio.wait_for(writer.wait_closed(), timeout=1.0)
         except Exception:
             pass
             

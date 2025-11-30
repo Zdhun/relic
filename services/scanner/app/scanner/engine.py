@@ -17,9 +17,12 @@ from .path_discovery import PathDiscoverer
 from .waf_detection import detect_waf_and_visibility
 from ..config import settings
 
+from .scope import ScopeManager, EndpointClass
+
 class ScanEngine:
     def __init__(self):
         self.http_client = None
+        self.scope_manager = ScopeManager()
 
     async def run_scan(self, target_input: str, log_callback: Callable[[ScanLogEntry], Awaitable[None]] = None) -> ScanResult:
         """
@@ -76,7 +79,8 @@ class ScanEngine:
 
             async def task_http():
                 try:
-                    return await self.http_client.get(target_info.full_url)
+                    # Enforce a hard timeout on the initial request
+                    return await asyncio.wait_for(self.http_client.get(target_info.full_url), timeout=15.0)
                 except Exception as e:
                     await log("ERROR", f"Initial HTTP request failed: {e}")
                     return None
@@ -140,12 +144,21 @@ class ScanEngine:
             if final_scheme == "https":
                 await log("INFO", f"Collecting TLS info for host {final_host}...")
                 loop = asyncio.get_running_loop()
-                tls_result = await loop.run_in_executor(None, check_tls, final_host, final_port)
-                tls_findings, tls_details = tls_result
-                if tls_details:
-                    await log("INFO", "TLS info collected.")
-                if tls_findings:
-                    findings.extend(tls_findings)
+                try:
+                    await log("INFO", "Starting TLS check with 5s timeout...")
+                    tls_result = await asyncio.wait_for(
+                        loop.run_in_executor(None, check_tls, final_host, final_port),
+                        timeout=5.0
+                    )
+                    tls_findings, tls_details = tls_result
+                    if tls_details:
+                        await log("INFO", "TLS info collected.")
+                    if tls_findings:
+                        findings.extend(tls_findings)
+                except asyncio.TimeoutError:
+                    await log("WARNING", "TLS check timed out, skipping.")
+                except Exception as e:
+                    await log("ERROR", f"TLS check failed: {e}")
             
             # 5. Header Checks
             await log("INFO", "Analyzing HTTP headers...")
@@ -177,14 +190,27 @@ class ScanEngine:
             checked_urls = set()
             
             async def process_url(url_info):
-                url = url_info["url"] if isinstance(url_info, dict) else url_info
+                if isinstance(url_info, dict):
+                    url = url_info["url"]
+                    classification = url_info.get("classification", EndpointClass.UNKNOWN)
+                else:
+                    url = url_info
+                    # Classify initial target
+                    ct = response.headers.get("Content-Type") if url == target_info.full_url else None
+                    classification = self.scope_manager.classify_endpoint(url, content_type=ct)
+
                 if url in checked_urls:
                     return
                 checked_urls.add(url)
                 
+                # Log interesting classifications
+                if classification != EndpointClass.STATIC_ASSET:
+                    # await log("INFO", f"Testing {url} [{classification}]")
+                    pass
+                
                 res = await asyncio.gather(
-                    check_xss_url(url, self.http_client, log),
-                    check_sqli_url(url, self.http_client, log),
+                    check_xss_url(url, self.http_client, log, classification),
+                    check_sqli_url(url, self.http_client, log, classification),
                     return_exceptions=True
                 )
                 

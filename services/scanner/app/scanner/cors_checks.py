@@ -83,7 +83,7 @@ async def check_cors(target_url: str, initial_headers: Dict[str, str], http_clie
         await log_callback("INFO", f"Probing CORS with Origin: {evil_origin}")
         
     probe_headers = {"Origin": evil_origin}
-    response = await http_client.get(target_url, extra_headers=probe_headers)
+    response = await http_client.get(target_url, headers=probe_headers)
     
     if response:
         resp_origin = response.headers.get("Access-Control-Allow-Origin")
@@ -122,7 +122,7 @@ async def check_cors(target_url: str, initial_headers: Dict[str, str], http_clie
     if log_callback:
         await log_callback("INFO", f"Probing CORS with Origin: {null_origin}")
         
-    response_null = await http_client.get(target_url, extra_headers={"Origin": null_origin})
+    response_null = await http_client.get(target_url, headers={"Origin": null_origin})
     if response_null:
         resp_origin = response_null.headers.get("Access-Control-Allow-Origin")
         resp_creds = response_null.headers.get("Access-Control-Allow-Credentials")

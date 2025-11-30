@@ -1,24 +1,29 @@
+import httpx
 import asyncio
 import time
-import httpx
-from datetime import datetime
-from typing import Optional, Dict, Any, Callable, Awaitable
-from ..config import settings, Settings
+from typing import Optional, List, Dict, Any, Callable, Awaitable
+from ..config import Settings
 
 class HttpClient:
-    def __init__(self, config: Settings = settings, log_callback: Callable[[str, str], Awaitable[None]] = None):
-        self.settings = config
+    def __init__(self, config: Settings, log_callback: Callable[[str, str], Awaitable[None]] = None):
+        self.config = config
         self.log_callback = log_callback
         self.client: Optional[httpx.AsyncClient] = None
-        self.last_request_time = 0
-        self.history: list[Dict[str, Any]] = []
+        self.history: List[Dict[str, Any]] = []
+        self.last_request_time = 0.0
+        
+        # Adaptive Rate Limiting
+        self.consecutive_errors = 0
+        self.current_delay = config.RATE_LIMIT_DELAY
+        self.request_timestamps = [] # For sliding window
 
     async def __aenter__(self):
         self.client = httpx.AsyncClient(
-            verify=False, 
-            follow_redirects=True, 
-            timeout=self.settings.DEFAULT_TIMEOUT,
-            headers={"User-Agent": self.settings.USER_AGENT}
+            verify=False,
+            follow_redirects=True,
+            timeout=self.config.DEFAULT_TIMEOUT,
+            headers={"User-Agent": self.config.USER_AGENT},
+            limits=httpx.Limits(max_keepalive_connections=10, max_connections=20)
         )
         return self
 
@@ -27,125 +32,85 @@ class HttpClient:
             await self.client.aclose()
             self.client = None
 
-    async def _ensure_client(self):
-        if self.client is None:
-            self.client = httpx.AsyncClient(
-                verify=False, 
-                follow_redirects=True, 
-                timeout=self.settings.DEFAULT_TIMEOUT,
-                headers={"User-Agent": self.settings.USER_AGENT}
-            )
-
-    async def close(self):
-        if self.client:
-            await self.client.aclose()
-            self.client = None
-
-    async def get(self, url: str, extra_headers: Dict[str, str] = None) -> Optional[httpx.Response]:
-        """
-        Performs a GET request to the specified URL with rate limiting and retries.
-        Returns the response object or None if an error occurs.
-        """
-        await self._ensure_client()
-        
-        # Merge headers
-        request_headers = {} # Client has default headers
-        if extra_headers:
-            request_headers.update(extra_headers)
-
-        # Rate Limiting
+    async def _wait_for_rate_limit(self):
         now = time.time()
-        elapsed = now - self.last_request_time
-        if elapsed < self.settings.RATE_LIMIT_DELAY:
-            await asyncio.sleep(self.settings.RATE_LIMIT_DELAY - elapsed)
-        self.last_request_time = time.time()
-
-        if self.log_callback:
-            await self.log_callback("INFO", f"Requesting: {url}")
-
-        start_time = time.time()
-        retry_count = 0
         
-        for attempt in range(self.settings.MAX_RETRIES + 1):
-            try:
-                response = await self.client.get(url, headers=request_headers)
-                
-                duration_ms = int((time.time() - start_time) * 1000)
-                final_url = str(response.url)
-                redirect_chain = [
-                    {"status": r.status_code, "location": r.headers.get("Location")}
-                    for r in response.history
-                ]
-                redirect_count = len(redirect_chain)
-
-                if self.log_callback:
-                    await self.log_callback("INFO", f"Response: {response.status_code} from {url} ({duration_ms}ms)")
-                    await self.log_callback("INFO", f"Final URL: {final_url} (redirects: {redirect_count})")
-                
-                # Record history
-                self.history.append({
-                    "url": url,
-                    "requested_url": url,
-                    "final_url": final_url,
-                    "redirect_chain": redirect_chain,
-                    "method": "GET",
-                    "request_headers": dict(response.request.headers),
-                    "status_code": response.status_code,
-                    "response_headers": dict(response.headers),
-                    "timestamp": datetime.utcnow().isoformat(),
-                    "duration_ms": duration_ms,
-                    "retry_count": retry_count
-                })
-                
-                return response
-                
-            except (httpx.TimeoutException, httpx.ConnectError, httpx.ReadTimeout, httpx.WriteTimeout, httpx.PoolTimeout) as e:
-                if attempt < self.settings.MAX_RETRIES:
-                    retry_count += 1
-                    if self.log_callback:
-                        await self.log_callback("WARNING", f"Request failed ({type(e).__name__}), retrying... ({retry_count}/{self.settings.MAX_RETRIES})")
-                    await asyncio.sleep(1) # Wait a bit before retry
-                    continue
-                else:
-                    # Log error or handle it in the engine
-                    print(f"Request error for {url}: {e}")
-                    
-                    duration_ms = int((time.time() - start_time) * 1000)
-                    self.history.append({
-                        "url": url,
-                        "method": "GET",
-                        "request_headers": dict(request_headers), # Approximation
-                        "error": str(e),
-                        "timestamp": datetime.utcnow().isoformat(),
-                        "duration_ms": duration_ms,
-                        "retry_count": retry_count
-                    })
-                    
-                    return None
-                    
-            except Exception as e:
-                print(f"Unexpected error for {url}: {e}")
-                return None
-
-    async def head(self, url: str) -> Optional[httpx.Response]:
-        """
-        Performs a HEAD request to the specified URL.
-        """
-        await self._ensure_client()
-        
-        # Rate Limiting (reusing logic)
-        now = time.time()
+        # 1. Basic Delay
         elapsed = now - self.last_request_time
-        if elapsed < self.settings.RATE_LIMIT_DELAY:
-            await asyncio.sleep(self.settings.RATE_LIMIT_DELAY - elapsed)
-        self.last_request_time = time.time()
+        if elapsed < self.current_delay:
+            await asyncio.sleep(self.current_delay - elapsed)
+            
+        # 2. Adaptive: Requests per minute
+        if self.config.ADAPTIVE_RATE_LIMIT:
+            # Clean old timestamps (older than 60s)
+            self.request_timestamps = [t for t in self.request_timestamps if now - t < 60]
+            
+            if len(self.request_timestamps) >= self.config.MAX_REQUESTS_PER_MINUTE:
+                # Wait until oldest expires
+                if self.request_timestamps:
+                    oldest = self.request_timestamps[0]
+                    wait_time = 60 - (now - oldest)
+                    if wait_time > 0:
+                        if self.log_callback:
+                            await self.log_callback("WARNING", f"Rate limit reached ({self.config.MAX_REQUESTS_PER_MINUTE} rpm). Slowing down for {wait_time:.2f}s.")
+                        await asyncio.sleep(wait_time)
 
-        if self.log_callback:
-            await self.log_callback("INFO", f"Checking (HEAD): {url}")
+    async def request(self, method: str, url: str, **kwargs) -> Optional[httpx.Response]:
+        if not self.client:
+            raise RuntimeError("HttpClient not initialized. Use 'async with'.")
+
+        await self._wait_for_rate_limit()
 
         try:
-            response = await self.client.head(url)
+            start_time = time.time()
+            response = await self.client.request(method, url, **kwargs)
+            latency = time.time() - start_time
+            
+            self.last_request_time = time.time()
+            self.request_timestamps.append(self.last_request_time)
+            
+            self.history.append({
+                "timestamp": self.last_request_time,
+                "method": method,
+                "url": url,
+                "status": response.status_code,
+                "latency": latency
+            })
+            
+            # Adaptive Logic
+            if self.config.ADAPTIVE_RATE_LIMIT:
+                if response.status_code >= 500 or latency > self.config.LATENCY_THRESHOLD:
+                    self.consecutive_errors += 1
+                    if self.consecutive_errors >= self.config.ERROR_THRESHOLD:
+                        # Increase delay
+                        self.current_delay = min(self.current_delay * 2, 5.0) # Cap at 5s
+                        if self.log_callback:
+                            await self.log_callback("WARNING", f"High errors/latency detected. Increasing delay to {self.current_delay:.2f}s")
+                        self.consecutive_errors = 0 # Reset counter after adjustment
+                else:
+                    # Success - slowly decrease delay back to normal
+                    if self.consecutive_errors > 0:
+                        self.consecutive_errors -= 1
+                    else:
+                        self.current_delay = max(self.config.RATE_LIMIT_DELAY, self.current_delay * 0.9)
+
             return response
-        except Exception as e:
-            # HEAD failed, might be 405 or connection error
-            return None
+
+        except (httpx.RequestError, httpx.TimeoutException, httpx.ReadTimeout, httpx.WriteTimeout, httpx.PoolTimeout) as e:
+            # Handle connection errors as "errors" for adaptive logic
+            if self.config.ADAPTIVE_RATE_LIMIT:
+                self.consecutive_errors += 1
+                if self.consecutive_errors >= self.config.ERROR_THRESHOLD:
+                     self.current_delay = min(self.current_delay * 2, 5.0)
+            
+            # Re-raise to let caller handle failure
+            raise e
+
+    async def get(self, url: str, **kwargs) -> Optional[httpx.Response]:
+        return await self.request("GET", url, **kwargs)
+
+    async def post(self, url: str, **kwargs) -> Optional[httpx.Response]:
+        return await self.request("POST", url, **kwargs)
+
+    async def head(self, url: str, **kwargs) -> Optional[httpx.Response]:
+        return await self.request("HEAD", url, **kwargs)

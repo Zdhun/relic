@@ -2,21 +2,62 @@ from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 from reportlab.lib import colors
 from io import BytesIO
+import json
+import textwrap
 from .models import ScanResult
+
+def draw_wrapped_text(c, text, x, y, max_width, line_height=14, font="Helvetica", size=10, color=colors.black):
+    """Helper to draw text wrapped to a specific width."""
+    c.setFont(font, size)
+    c.setFillColor(color)
+    
+    # Estimate characters per line (approximate, assuming average char width)
+    # Helvetica average width is roughly 0.5 * size?
+    # Better to use textwrap
+    chars_per_line = int(max_width / (size * 0.5)) 
+    
+    lines = []
+    # Handle newlines in text
+    for paragraph in text.split('\n'):
+        lines.extend(textwrap.wrap(paragraph, width=chars_per_line))
+    
+    current_y = y
+    for line in lines:
+        c.drawString(x, current_y, line)
+        current_y -= line_height
+        
+    return current_y
 
 def generate_pdf(result: ScanResult) -> bytes:
     buffer = BytesIO()
     c = canvas.Canvas(buffer, pagesize=A4)
     width, height = A4
     
+    # Helper to track Y position
+    y = height - 50
+    
+    def check_page_break(current_y, needed=50):
+        nonlocal y
+        if current_y < needed:
+            c.showPage()
+            y = height - 50
+            return y
+        return current_y
+
     # Header
     c.setFillColor(colors.black)
     c.setFont("Helvetica-Bold", 24)
-    c.drawString(50, height - 50, "AuditAI Executive Summary")
+    c.drawString(50, y, "AuditAI Executive Summary")
+    y -= 30
     
     c.setFont("Helvetica", 12)
-    c.drawString(50, height - 80, f"Target: {result.target}")
-    c.drawString(50, height - 100, f"Date: {result.timestamp.strftime('%Y-%m-%d %H:%M:%S')}")
+    c.drawString(50, y, f"Target: {result.target}")
+    y -= 20
+    c.drawString(50, y, f"Date: {result.timestamp.strftime('%Y-%m-%d %H:%M:%S')}")
+    y -= 20
+    if result.response_time_ms:
+        c.drawString(50, y, f"Duration: {result.response_time_ms / 1000:.2f}s")
+        y -= 20
     
     # Score
     c.setFont("Helvetica-Bold", 48)
@@ -25,34 +66,58 @@ def generate_pdf(result: ScanResult) -> bytes:
     c.setFont("Helvetica", 12)
     c.drawString(width - 150, height - 100, f"Score: {result.score}/100")
     
-    # Line
+    y -= 20
     c.setStrokeColor(colors.gray)
-    c.line(50, height - 120, width - 50, height - 120)
-    
-    # Findings
-    y = height - 160
-    c.setFillColor(colors.black)
-    c.setFont("Helvetica-Bold", 16)
-    c.drawString(50, y, "Top Security Risks")
+    c.line(50, y, width - 50, y)
     y -= 30
     
+    # Summary Stats
+    c.setFillColor(colors.black)
+    c.setFont("Helvetica-Bold", 14)
+    c.drawString(50, y, "Vulnerability Summary")
+    y -= 20
+    
+    severity_counts = {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}
+    for f in result.findings:
+        if f.severity in severity_counts:
+            severity_counts[f.severity] += 1
+            
+    c.setFont("Helvetica", 12)
+    stats_x = 50
+    for sev, count in severity_counts.items():
+        if count > 0:
+            c.drawString(stats_x, y, f"{sev.title()}: {count}")
+            stats_x += 100
+    y -= 40
+    
+    # Findings
+    c.setFont("Helvetica-Bold", 16)
+    c.drawString(50, y, "Detailed Findings")
+    y -= 30
+    
+    if not result.findings:
+        c.setFont("Helvetica", 12)
+        c.drawString(50, y, "No vulnerabilities found.")
+        y -= 20
+    
     for finding in result.findings:
+        y = check_page_break(y, 100)
+        
         c.setFillColor(colors.black)
         c.setFont("Helvetica-Bold", 12)
-        c.drawString(50, y, f"{finding.title} ({finding.severity})")
+        c.drawString(50, y, f"{finding.title} ({finding.severity.upper()})")
         y -= 20
         
         c.setFont("Helvetica", 10)
         c.setFillColor(colors.darkgray)
-        c.drawString(50, y, f"Description: {finding.description}")
+        # Simple text wrap logic could be added here, but for now just truncate or let it run
+        c.drawString(50, y, f"Category: {finding.category}")
         y -= 15
-        c.drawString(50, y, f"Recommendation: {finding.recommendation}")
-        y -= 40
+        c.drawString(50, y, f"Description: {finding.description[:100]}...") 
+        y -= 15
+        c.drawString(50, y, f"Recommendation: {finding.recommendation[:100]}...")
+        y -= 30
         
-        if y < 100:
-            c.showPage()
-            y = height - 50
-
     # Footer
     c.setFont("Helvetica-Oblique", 8)
     c.setFillColor(colors.gray)
@@ -61,3 +126,174 @@ def generate_pdf(result: ScanResult) -> bytes:
     c.save()
     buffer.seek(0)
     return buffer.getvalue()
+
+def generate_ai_pdf(scan_result: ScanResult, ai_summary: dict) -> bytes:
+    """Generates a one-page AI security report."""
+    buffer = BytesIO()
+    c = canvas.Canvas(buffer, pagesize=A4)
+    width, height = A4
+    
+    # Margins
+    margin_x = 50
+    max_width = width - (2 * margin_x)
+    
+    y = height - 50
+    
+    # 1. Header
+    c.setFillColor(colors.black)
+    c.setFont("Helvetica-Bold", 18)
+    c.drawString(margin_x, y, "Relic v1.0.0 – AI Security Report")
+    y -= 25
+    
+    c.setFont("Helvetica", 10)
+    c.drawString(margin_x, y, f"Target: {scan_result.target}")
+    y -= 15
+    
+    # Score & Risk & Model
+    score_letter = ai_summary.get("global_score", {}).get("letter", "?")
+    score_num = ai_summary.get("global_score", {}).get("numeric", 0)
+    risk = ai_summary.get("overall_risk_level", "Unknown")
+    model = ai_summary.get("model_name", "Unknown Model")
+    
+    c.drawString(margin_x, y, f"Score: {score_letter} ({score_num}/100)   |   Niveau de risque: {risk}")
+    y -= 15
+    c.drawString(margin_x, y, f"Modèle IA: {model}")
+    y -= 10
+    
+    c.setStrokeColor(colors.lightgrey)
+    c.line(margin_x, y, width - margin_x, y)
+    y -= 20
+    
+    # 2. Executive Summary
+    c.setFont("Helvetica-Bold", 14)
+    c.setFillColor(colors.black)
+    c.drawString(margin_x, y, "Executive Summary")
+    y -= 20
+    
+    exec_summary = ai_summary.get("executive_summary", "No summary provided.")
+    y = draw_wrapped_text(c, exec_summary, margin_x, y, max_width, line_height=12, font="Helvetica", size=10)
+    y -= 20
+    
+    # 3. Top 3 Vulnerabilities
+    c.setFont("Helvetica-Bold", 14)
+    c.drawString(margin_x, y, "Top 3 Vulnerabilities")
+    y -= 20
+    
+    top_vulns = ai_summary.get("top_3_vulnerabilities", [])
+    if not top_vulns:
+        y = draw_wrapped_text(c, "Aucune vulnérabilité majeure détectée.", margin_x, y, max_width)
+        y -= 10
+        
+    for vuln in top_vulns[:3]:
+        title = vuln.get("title", "Untitled")
+        severity = vuln.get("severity", "unknown").upper()
+        area = vuln.get("area", "General")
+        explanation = vuln.get("explanation_simple", "")
+        fix = vuln.get("fix_recommendation", "")
+        
+        # Bullet point title
+        c.setFont("Helvetica-Bold", 10)
+        c.setFillColor(colors.black)
+        c.drawString(margin_x, y, f"• {title} [{severity} – {area}]")
+        y -= 14
+        
+        # Explanation
+        y = draw_wrapped_text(c, f"Explication : {explanation}", margin_x + 10, y, max_width - 10, line_height=12, font="Helvetica", size=9, color=colors.darkgrey)
+        y -= 2
+        
+        # Recommendation
+        y = draw_wrapped_text(c, f"Recommandation : {fix}", margin_x + 10, y, max_width - 10, line_height=12, font="Helvetica", size=9, color=colors.darkgrey)
+        y -= 15
+        
+    y -= 10
+    
+    # 4. Infrastructure
+    c.setFont("Helvetica-Bold", 14)
+    c.setFillColor(colors.black)
+    c.drawString(margin_x, y, "Infrastructure")
+    y -= 20
+    
+    infra = ai_summary.get("infrastructure", {})
+    infra_text = [
+        f"Hébergeur : {infra.get('hosting_provider') or 'N/A'}",
+        f"IP : {infra.get('ip') or 'N/A'}",
+        f"Issuer TLS : {infra.get('tls_issuer') or 'N/A'}",
+        f"Server : {infra.get('server_header') or 'N/A'}"
+    ]
+    
+    for line in infra_text:
+        c.setFont("Helvetica", 10)
+        c.drawString(margin_x, y, line)
+        y -= 14
+        
+    y -= 20
+    
+    # 5. Site Map
+    c.setFont("Helvetica-Bold", 14)
+    c.drawString(margin_x, y, "Site Map")
+    y -= 20
+    
+    site_map = ai_summary.get("site_map", {})
+    total_pages = site_map.get("total_pages", 0)
+    pages = site_map.get("pages", [])
+    
+    c.setFont("Helvetica", 10)
+    c.drawString(margin_x, y, f"Pages détectées : {total_pages}")
+    y -= 14
+    
+    # List pages (limit to fit page)
+    max_pages_lines = 8
+    for i, page in enumerate(pages):
+        if i >= max_pages_lines:
+            c.drawString(margin_x, y, "... (voir rapport complet pour plus de détails)")
+            break
+        
+        # Truncate long URLs
+        display_url = page if len(page) < 80 else page[:77] + "..."
+        c.drawString(margin_x, y, f"- {display_url}")
+        y -= 12
+        
+        # Safety check for page bottom
+        if y < 30:
+            break
+            
+    c.save()
+    buffer.seek(0)
+    return buffer.getvalue()
+
+def generate_json(result: ScanResult) -> str:
+    """Returns a JSON string of the scan result."""
+    return result.model_dump_json(indent=2)
+
+def generate_markdown(result: ScanResult) -> str:
+    """Returns a Markdown report string."""
+    md = f"# AuditAI Security Report\n\n"
+    md += f"**Target:** {result.target}\n"
+    md += f"**Date:** {result.timestamp.strftime('%Y-%m-%d %H:%M:%S')}\n"
+    md += f"**Grade:** {result.grade} (Score: {result.score}/100)\n\n"
+    
+    md += "## Vulnerability Summary\n\n"
+    severity_counts = {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}
+    for f in result.findings:
+        if f.severity in severity_counts:
+            severity_counts[f.severity] += 1
+            
+    md += "| Severity | Count |\n|---|---|\n"
+    for sev, count in severity_counts.items():
+        md += f"| {sev.title()} | {count} |\n"
+    md += "\n"
+    
+    md += "## Detailed Findings\n\n"
+    if not result.findings:
+        md += "No vulnerabilities found.\n"
+        
+    for f in result.findings:
+        md += f"### {f.title} ({f.severity.upper()})\n"
+        md += f"**Category:** {f.category}\n\n"
+        md += f"**Description:** {f.description}\n\n"
+        md += f"**Recommendation:** {f.recommendation}\n\n"
+        if f.evidence:
+            md += f"**Evidence:**\n```\n{f.evidence}\n```\n\n"
+        md += "---\n"
+        
+    return md
