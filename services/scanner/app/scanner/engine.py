@@ -10,7 +10,7 @@ from .http_client import HttpClient
 from .tls_checks import check_tls
 from .header_checks import check_security_headers
 from .cookies_checks import analyze_cookies
-from .vuln_checks import check_exposure, check_xss, check_sqli, check_https_enforcement, check_xss_url, check_sqli_url
+from .vuln_checks import check_exposure, check_xss, check_sqli, check_https_enforcement, check_xss_url, check_sqli_url, check_sensitive_url
 from .scoring import calculate_score
 from .port_scanner import scan_ports
 from .path_discovery import PathDiscoverer
@@ -211,6 +211,7 @@ class ScanEngine:
                 res = await asyncio.gather(
                     check_xss_url(url, self.http_client, log, classification),
                     check_sqli_url(url, self.http_client, log, classification),
+                    check_sensitive_url(url, self.http_client, log, classification),
                     return_exceptions=True
                 )
                 
@@ -234,6 +235,17 @@ class ScanEngine:
                             "url": url,
                             "outcome": "fail" if s_findings else "pass",
                             "evidence": s_evidence
+                        })
+
+                if not isinstance(res[2], Exception):
+                    sens_findings, sens_evidence = res[2]
+                    vuln_findings.extend(sens_findings)
+                    if sens_findings or sens_evidence:
+                        checks_outcomes.append({
+                            "name": "sensitive_file",
+                            "url": url,
+                            "outcome": "fail" if sens_findings else "pass",
+                            "evidence": sens_evidence
                         })
 
             try:

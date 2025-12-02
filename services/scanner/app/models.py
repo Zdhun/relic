@@ -34,6 +34,7 @@ class ScanResult(BaseModel):
     scan_status: str = "ok"
     blocking_mechanism: Optional[str] = None
     visibility_level: str = "good"
+    ai_analysis: Optional[Dict[str, Any]] = None
 
 class ScanResponse(BaseModel):
     scan_id: str

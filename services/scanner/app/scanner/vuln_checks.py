@@ -383,3 +383,75 @@ async def check_https_enforcement(target_info: 'TargetInfo', http_client: HttpCl
             await log_callback("WARNING", "HTTPS enforcement missing!")
 
     return findings, debug_data
+
+async def check_sensitive_url(url: str, http_client: HttpClient, log_callback: Callable[[str, str], Awaitable[None]] = None, classification: EndpointClass = EndpointClass.UNKNOWN) -> Tuple[List[Finding], List[Dict]]:
+    """
+    Checks if a discovered URL contains sensitive information (e.g. env dump, config).
+    """
+    findings = []
+    evidence_list = []
+    
+    # Keywords that suggest a sensitive file
+    SENSITIVE_KEYWORDS = ["env", "config", "backup", "dump", "secret", "credentials", "password", "key"]
+    
+    # Check if URL looks suspicious
+    url_lower = url.lower()
+    is_suspicious = any(k in url_lower for k in SENSITIVE_KEYWORDS)
+    
+    if not is_suspicious:
+        return findings, evidence_list
+
+    try:
+        # Perform GET request
+        response = await http_client.get(url)
+        if not response:
+            return findings, evidence_list
+            
+        evidence_list.append({
+            "url": url,
+            "status_code": response.status_code,
+            "type": "sensitive_check"
+        })
+
+        if response.status_code == 200:
+            content = response.text
+            
+            # Check for sensitive content patterns
+            patterns = [
+                ("AWS_ACCESS_KEY", "AWS Access Key"),
+                ("DB_PASSWORD", "Database Password"),
+                ("API_KEY", "Generic API Key"),
+                ("SECRET_KEY", "Secret Key"),
+                ("POSTGRES_PASSWORD", "Postgres Password"),
+                ("MYSQL_PWD", "MySQL Password"),
+                ("BEGIN RSA PRIVATE KEY", "RSA Private Key"),
+            ]
+            
+            found_secrets = []
+            for pattern, name in patterns:
+                if pattern in content:
+                    found_secrets.append(name)
+            
+            # Also check if it looks like a .env file (key=value pairs)
+            if "APP_ENV=" in content or "NODE_ENV=" in content or "DEBUG=" in content:
+                if "Environment Configuration" not in found_secrets:
+                    found_secrets.append("Environment Configuration")
+
+            if found_secrets:
+                description = f"Sensitive file detected at {url}. It appears to contain: {', '.join(found_secrets)}."
+                findings.append(Finding(
+                    title="Sensitive Information Exposure",
+                    severity="critical",
+                    category="exposure",
+                    description=description,
+                    recommendation="Remove this file immediately and rotate any exposed credentials.",
+                    evidence=f"URL: {url}\nSecrets found: {', '.join(found_secrets)}\nSnippet: {content[:200]}..."
+                ))
+                if log_callback:
+                    await log_callback("WARNING", f"Sensitive file confirmed: {url} ({', '.join(found_secrets)})")
+
+    except Exception as e:
+        if log_callback:
+            await log_callback("ERROR", f"Sensitive check failed for {url}: {e}")
+
+    return findings, evidence_list

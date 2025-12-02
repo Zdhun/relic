@@ -21,11 +21,13 @@ class OllamaClient:
             logger.debug(f"Ollama health check failed: {e}")
             return False
 
-    def chat(self, system_prompt: str, user_prompt: str) -> str:
+    async def chat(self, system_prompt: str, user_prompt: str) -> Any:
         """
         Sends a chat request to Ollama.
         Retries connection a few times if Ollama is warming up.
         """
+        import json
+        
         url = f"{self.base_url}/api/chat"
         payload = {
             "model": self.model,
@@ -33,35 +35,70 @@ class OllamaClient:
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt}
             ],
-            "stream": False
+            "stream": True
         }
         
         logger.info(f"Sending request to Ollama at {url} with model {self.model}")
         
+        print("\n" + "="*50)
+        print(f"--- SYSTEM PROMPT ({self.model}) ---")
+        print(system_prompt)
+        print("-" * 20)
+        print(f"--- USER PROMPT ({self.model}) ---")
+        print(user_prompt)
+        print("="*50 + "\n")
+        print(f"--- STREAMING RESPONSE ({self.model}) ---")
+        
         # Retry logic: Try 3 times with 2s delay
         import time
+        import asyncio
         max_retries = 3
-        for attempt in range(max_retries):
-            try:
-                response = httpx.post(url, json=payload, timeout=self.timeout)
-                response.raise_for_status()
-                data = response.json()
-                return data.get("message", {}).get("content", "")
-            except (httpx.ConnectError, httpx.ReadTimeout) as e:
-                if attempt < max_retries - 1:
-                    logger.warning(f"Ollama connection failed (attempt {attempt+1}/{max_retries}). Retrying in 2s... Error: {e}")
-                    time.sleep(2)
-                else:
-                    logger.error(f"Ollama connection failed after {max_retries} attempts: {e}")
+        # full_response = "" # No longer needed in generator
+        
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            for attempt in range(max_retries):
+                try:
+                    print(f"DEBUG: Starting stream request to {url}")
+                    async with client.stream("POST", url, json=payload) as response:
+                        print(f"DEBUG: Response status: {response.status_code}")
+                        response.raise_for_status()
+                        
+                        buffer = b""
+                        async for chunk in response.aiter_bytes():
+                            buffer += chunk
+                            while b"\n" in buffer:
+                                line, buffer = buffer.split(b"\n", 1)
+                                if not line:
+                                    continue
+                                try:
+                                    chunk_data = json.loads(line)
+                                    chunk_content = chunk_data.get("message", {}).get("content", "")
+                                    if chunk_content:
+                                        print(chunk_content, end="", flush=True)
+                                        yield chunk_content
+                                    
+                                    if chunk_data.get("done"):
+                                        break
+                                except json.JSONDecodeError:
+                                    continue
+                                
+                    print("\n" + "="*50 + "\n")
+                    return
+
+                except (httpx.ConnectError, httpx.ReadTimeout) as e:
+                    if attempt < max_retries - 1:
+                        logger.warning(f"Ollama connection failed (attempt {attempt+1}/{max_retries}). Retrying in 2s... Error: {e}")
+                        await asyncio.sleep(2)
+                    else:
+                        logger.error(f"Ollama connection failed after {max_retries} attempts: {e}")
+                        raise
+                except httpx.HTTPError as e:
+                    logger.error(f"Ollama HTTP error: {e}")
+                    # Async response body reading is different, skipping logging body for stream error to avoid complexity
                     raise
-            except httpx.HTTPError as e:
-                logger.error(f"Ollama HTTP error: {e}")
-                if e.response:
-                    logger.error(f"Ollama response body: {e.response.text}")
-                raise
-            except Exception as e:
-                logger.error(f"Ollama unexpected error: {e}")
-                raise
+                except Exception as e:
+                    logger.error(f"Ollama unexpected error: {e}")
+                    raise
 
 class OpenRouterClient:
     def __init__(self, model: str, api_key: str):
@@ -75,11 +112,13 @@ class OpenRouterClient:
         # We could do a small test call, but for now just check API key presence
         return bool(self.api_key and self.api_key.strip())
 
-    def chat(self, system_prompt: str, user_prompt: str) -> str:
+    async def chat(self, system_prompt: str, user_prompt: str) -> Any:
         """Sends a chat request to OpenRouter."""
         if not self.is_available():
             raise ValueError("OpenRouter API key is missing")
 
+        import json
+        
         url = f"{self.base_url}/chat/completions"
         headers = {
             "Authorization": f"Bearer {self.api_key}",
@@ -93,19 +132,54 @@ class OpenRouterClient:
             "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt}
-            ]
+            ],
+            "stream": True
         }
 
+        print("\n" + "="*50)
+        print(f"--- SYSTEM PROMPT ({self.model}) ---")
+        print(system_prompt)
+        print("-" * 20)
+        print(f"--- USER PROMPT ({self.model}) ---")
+        print(user_prompt)
+        print("="*50 + "\n")
+        print(f"--- STREAMING RESPONSE ({self.model}) ---")
+
+        # full_response = "" # No longer needed in generator
         try:
-            response = httpx.post(url, headers=headers, json=payload, timeout=self.timeout)
-            response.raise_for_status()
-            data = response.json()
-            # OpenAI-compatible response format
-            # {"choices": [{"message": {"content": "..."}}]}
-            choices = data.get("choices", [])
-            if not choices:
-                return ""
-            return choices[0].get("message", {}).get("content", "")
+            print(f"DEBUG: Starting OpenRouter stream request to {url}")
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                async with client.stream("POST", url, headers=headers, json=payload) as response:
+                    print(f"DEBUG: OpenRouter Response status: {response.status_code}")
+                    response.raise_for_status()
+                    
+                    buffer = b""
+                    async for chunk in response.aiter_bytes():
+                        buffer += chunk
+                        while b"\n" in buffer:
+                            line, buffer = buffer.split(b"\n", 1)
+                            line = line.strip()
+                            if not line:
+                                continue
+                            if line.startswith(b"data: "):
+                                data_str = line[6:] # Strip "data: "
+                                if data_str.strip() == b"[DONE]":
+                                    break
+                                try:
+                                    chunk_data = json.loads(data_str)
+                                    choices = chunk_data.get("choices", [])
+                                    if choices:
+                                        delta = choices[0].get("delta", {})
+                                        content = delta.get("content", "")
+                                        if content:
+                                            print(content, end="", flush=True)
+                                            yield content
+                                except json.JSONDecodeError:
+                                    continue
+            
+            print("\n" + "="*50 + "\n")
+            return
+
         except httpx.HTTPError as e:
             logger.error(f"OpenRouter HTTP error: {e}")
             raise

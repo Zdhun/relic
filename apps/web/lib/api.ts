@@ -34,19 +34,60 @@ export async function getAiProviderStatus(): Promise<any> {
     return res.json();
 }
 
-export async function generateAiAnalysis(scanId: string, provider?: string): Promise<any> {
+export async function generateAiAnalysis(
+    scanId: string,
+    provider?: string,
+    onChunk?: (chunk: string) => void
+): Promise<any> {
     const url = new URL(`${BASE_URL}/${scanId}/ai-analysis`, window.location.origin);
     if (provider) {
         url.searchParams.append("provider", provider);
     }
 
-    const res = await fetch(url.toString(), {
-        method: "POST",
-    });
+    const controller = new AbortController();
+    // Increase timeout to 10 minutes for very long streams
+    const timeoutId = setTimeout(() => controller.abort(), 600000);
 
-    if (!res.ok) {
-        const errorData = await res.json().catch(() => ({}));
-        throw new Error(errorData.detail || "Failed to generate AI analysis");
+    try {
+        const res = await fetch(url.toString(), {
+            method: "POST",
+            signal: controller.signal,
+        });
+
+        if (!res.ok) {
+            const errorData = await res.json().catch(() => ({}));
+            throw new Error(errorData.detail || "Failed to generate AI analysis");
+        }
+
+        if (!res.body) {
+            throw new Error("Response body is empty");
+        }
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let fullText = "";
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            const chunk = decoder.decode(value, { stream: true });
+            fullText += chunk;
+            if (onChunk) {
+                onChunk(chunk);
+            }
+        }
+
+        // Try to parse the full text as JSON at the end
+        try {
+            return JSON.parse(fullText);
+        } catch (e) {
+            console.warn("Failed to parse final AI response as JSON", e);
+            // Return raw text if parsing fails, or a structured error
+            return { raw_text: fullText, error: "Failed to parse JSON" };
+        }
+
+    } finally {
+        clearTimeout(timeoutId);
     }
-    return res.json();
 }

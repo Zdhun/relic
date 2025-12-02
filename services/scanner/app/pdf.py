@@ -1,34 +1,36 @@
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 from reportlab.lib import colors
+from reportlab.platypus import Paragraph
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.enums import TA_JUSTIFY, TA_LEFT
 from io import BytesIO
 import json
 import textwrap
 from .models import ScanResult
 
-def draw_wrapped_text(c, text, x, y, max_width, line_height=14, font="Helvetica", size=10, color=colors.black):
-    """Helper to draw text wrapped to a specific width."""
-    c.setFont(font, size)
-    c.setFillColor(color)
+def draw_paragraph(c, text, x, y, max_width, style=None):
+    """
+    Draws a paragraph on the canvas.
+    Returns the new y position (bottom of the paragraph).
+    """
+    if style is None:
+        styles = getSampleStyleSheet()
+        style = styles["Normal"]
     
-    # Estimate characters per line (approximate, assuming average char width)
-    # Helvetica average width is roughly 0.5 * size?
-    # Better to use textwrap
-    chars_per_line = int(max_width / (size * 0.5)) 
-    
-    lines = []
-    # Handle newlines in text
-    for paragraph in text.split('\n'):
-        lines.extend(textwrap.wrap(paragraph, width=chars_per_line))
-    
-    current_y = y
-    for line in lines:
-        c.drawString(x, current_y, line)
-        current_y -= line_height
-        
-    return current_y
+    p = Paragraph(text, style)
+    w, h = p.wrap(max_width, 1000)  # 1000 is just a large enough height
+    p.drawOn(c, x, y - h)
+    return y - h
 
 def generate_pdf(result: ScanResult) -> bytes:
+    # ... (Keep existing generate_pdf implementation if needed, or update it too. 
+    # The user specifically asked about the AI report which is likely generate_ai_pdf based on context, 
+    # but let's update generate_ai_pdf primarily as that's the one with "Synthèse Exécutive")
+    # For brevity in this tool call, I will focus on generate_ai_pdf and helper functions.
+    # But I need to provide the full file content or careful chunks.
+    # I will replace the whole file content to be safe and consistent.
+    
     buffer = BytesIO()
     c = canvas.Canvas(buffer, pagesize=A4)
     width, height = A4
@@ -110,7 +112,6 @@ def generate_pdf(result: ScanResult) -> bytes:
         
         c.setFont("Helvetica", 10)
         c.setFillColor(colors.darkgray)
-        # Simple text wrap logic could be added here, but for now just truncate or let it run
         c.drawString(50, y, f"Category: {finding.category}")
         y -= 15
         c.drawString(50, y, f"Description: {finding.description[:100]}...") 
@@ -127,136 +128,262 @@ def generate_pdf(result: ScanResult) -> bytes:
     buffer.seek(0)
     return buffer.getvalue()
 
+def draw_badge(c, x, y, text, bg_color, text_color=colors.white, width=60, height=20):
+    """Draws a rounded badge."""
+    c.setFillColor(bg_color)
+    c.roundRect(x, y - height + 5, width, height, 4, fill=1, stroke=0)
+    c.setFillColor(text_color)
+    c.setFont("Helvetica-Bold", 8)
+    c.drawCentredString(x + width/2, y - height + 10, text)
+
+def get_severity_color(severity):
+    s = severity.lower()
+    if s == 'critical': return colors.HexColor('#DC2626') # Red 600
+    if s == 'high': return colors.HexColor('#EA580C') # Orange 600
+    if s == 'medium': return colors.HexColor('#D97706') # Amber 600
+    if s == 'low': return colors.HexColor('#16A34A') # Green 600
+    return colors.gray
+
 def generate_ai_pdf(scan_result: ScanResult, ai_summary: dict) -> bytes:
-    """Generates a one-page AI security report."""
+    """Generates a professional one-page AI security report."""
     buffer = BytesIO()
     c = canvas.Canvas(buffer, pagesize=A4)
     width, height = A4
     
-    # Margins
-    margin_x = 50
-    max_width = width - (2 * margin_x)
+    # Colors
+    primary_color = colors.HexColor('#0F172A') # Slate 900
+    accent_color = colors.HexColor('#10B981') # Emerald 500
+    text_color = colors.HexColor('#334155') # Slate 700
+    light_bg = colors.HexColor('#F8FAFC') # Slate 50
+    border_color = colors.HexColor('#E2E8F0') # Slate 200
     
-    y = height - 50
+    # Margins - Reduced to use more space
+    margin_x = 30
+    content_width = width - (2 * margin_x)
     
-    # 1. Header
-    c.setFillColor(colors.black)
-    c.setFont("Helvetica-Bold", 18)
-    c.drawString(margin_x, y, "Relic v1.0.0 – AI Security Report")
-    y -= 25
+    y = height - 40
+    
+    # Styles for Justified Text
+    styles = getSampleStyleSheet()
+    
+    # Executive Summary Style
+    summary_style = ParagraphStyle(
+        'Summary',
+        parent=styles['Normal'],
+        fontName='Helvetica',
+        fontSize=10,
+        leading=14,
+        textColor=text_color,
+        alignment=TA_JUSTIFY
+    )
+
+    # Finding Description Style
+    finding_style = ParagraphStyle(
+        'Finding',
+        parent=styles['Normal'],
+        fontName='Helvetica',
+        fontSize=9,
+        leading=12,
+        textColor=text_color,
+        alignment=TA_JUSTIFY
+    )
+    
+    # --- 1. HEADER SIMPLE ---
+    # Left: Target & Date
+    c.setFillColor(primary_color)
+    c.setFont("Helvetica-Bold", 14)
+    c.drawString(margin_x, y, f"{scan_result.target}")
     
     c.setFont("Helvetica", 10)
-    c.drawString(margin_x, y, f"Target: {scan_result.target}")
-    y -= 15
+    c.setFillColor(colors.gray)
+    c.drawString(margin_x, y - 15, f"Rapport du {scan_result.timestamp.strftime('%Y-%m-%d')}")
     
-    # Score & Risk & Model
+    # Right: Risk Level
     score_letter = ai_summary.get("global_score", {}).get("letter", "?")
     score_num = ai_summary.get("global_score", {}).get("numeric", 0)
     risk = ai_summary.get("overall_risk_level", "Unknown")
-    model = ai_summary.get("model_name", "Unknown Model")
     
-    c.drawString(margin_x, y, f"Score: {score_letter} ({score_num}/100)   |   Niveau de risque: {risk}")
-    y -= 15
-    c.drawString(margin_x, y, f"Modèle IA: {model}")
-    y -= 10
+    # Align right
+    right_x = width - margin_x
     
-    c.setStrokeColor(colors.lightgrey)
+    c.setFillColor(primary_color)
+    c.setFont("Helvetica-Bold", 24)
+    c.drawRightString(right_x, y, score_letter)
+    
+    c.setFont("Helvetica", 10)
+    c.setFillColor(text_color)
+    c.drawRightString(right_x, y - 15, f"{score_num}/100")
+    
+    c.setFont("Helvetica-Bold", 10)
+    risk_color = get_severity_color('critical') if risk.lower() in ['critique', 'critical'] else \
+                 get_severity_color('high') if risk.lower() in ['élevé', 'high'] else \
+                 get_severity_color('medium') if risk.lower() in ['moyen', 'medium'] else \
+                 get_severity_color('low')
+    c.setFillColor(risk_color)
+    c.drawRightString(right_x - 40, y - 8, risk.upper())
+    
+    y -= 30
+    
+    # --- 2. BARRE DE SÉPARATION ---
+    c.setStrokeColor(border_color)
+    c.setLineWidth(1)
     c.line(margin_x, y, width - margin_x, y)
-    y -= 20
+    y -= 30
     
-    # 2. Executive Summary
+    # --- 3. SYNTHÈSE EXÉCUTIVE ---
+    c.setFillColor(primary_color)
     c.setFont("Helvetica-Bold", 14)
-    c.setFillColor(colors.black)
-    c.drawString(margin_x, y, "Executive Summary")
+    c.drawString(margin_x, y, "Synthèse Exécutive")
     y -= 20
     
     exec_summary = ai_summary.get("executive_summary", "No summary provided.")
-    y = draw_wrapped_text(c, exec_summary, margin_x, y, max_width, line_height=12, font="Helvetica", size=10)
-    y -= 20
+    # Use draw_paragraph for justified text
+    y = draw_paragraph(c, exec_summary, margin_x, y, content_width, style=summary_style)
+    y -= 30
     
-    # 3. Top 3 Vulnerabilities
+    # --- 4. TOP VULNÉRABILITÉS ---
+    c.setFillColor(primary_color)
     c.setFont("Helvetica-Bold", 14)
-    c.drawString(margin_x, y, "Top 3 Vulnerabilities")
+    c.drawString(margin_x, y, "Top des vulnérabilités")
     y -= 20
     
-    top_vulns = ai_summary.get("top_3_vulnerabilities", [])
+    top_vulns = ai_summary.get("key_vulnerabilities", [])
     if not top_vulns:
-        y = draw_wrapped_text(c, "Aucune vulnérabilité majeure détectée.", margin_x, y, max_width)
-        y -= 10
+        # Fallback
+        top_vulns = ai_summary.get("top_3_vulnerabilities", [])
+        
+    if not top_vulns:
+        c.setFont("Helvetica-Oblique", 10)
+        c.setFillColor(colors.gray)
+        c.drawString(margin_x, y, "Aucune vulnérabilité critique détectée.")
+        y -= 20
         
     for vuln in top_vulns[:3]:
-        title = vuln.get("title", "Untitled")
-        severity = vuln.get("severity", "unknown").upper()
-        area = vuln.get("area", "General")
-        explanation = vuln.get("explanation_simple", "")
+        # Calculate dynamic height based on text content
+        # We need to simulate wrapping to guess height
+        expl = vuln.get("explanation_simple", "")
         fix = vuln.get("fix_recommendation", "")
         
-        # Bullet point title
+        # Approximate height calculation is tricky with Paragraph.
+        # Let's use a fixed height for now but make it generous, or calculate it.
+        # Better: Calculate height using wrap
+        p_expl = Paragraph(expl, finding_style)
+        w_expl, h_expl = p_expl.wrap(content_width - 30, 1000)
+        
+        # Fix style (bold prefix, normal text)
+        # We can construct a single paragraph for fix: "<b>Correction :</b> text"
+        fix_text = f"<b>Correction :</b> {fix}"
+        p_fix = Paragraph(fix_text, finding_style)
+        w_fix, h_fix = p_fix.wrap(content_width - 30, 1000)
+        
+        card_height = h_expl + h_fix + 45 # Padding + Title
+        
+        # Check page break
+        if y - card_height < 50:
+            c.showPage()
+            y = height - 50
+        
+        c.setStrokeColor(border_color)
+        c.setFillColor(colors.white)
+        c.roundRect(margin_x, y - card_height, content_width, card_height, 4, fill=1, stroke=1)
+        
+        # Severity Badge (Left side of card)
+        sev = vuln.get("severity", "low")
+        sev_col = get_severity_color(sev)
+        
+        # Draw colored bar on left
+        c.setFillColor(sev_col)
+        c.rect(margin_x, y - card_height, 4, card_height, fill=1, stroke=0)
+        
+        # Title
+        c.setFillColor(primary_color)
         c.setFont("Helvetica-Bold", 10)
-        c.setFillColor(colors.black)
-        c.drawString(margin_x, y, f"• {title} [{severity} – {area}]")
-        y -= 14
+        c.drawString(margin_x + 15, y - 15, vuln.get("title", "Untitled"))
         
-        # Explanation
-        y = draw_wrapped_text(c, f"Explication : {explanation}", margin_x + 10, y, max_width - 10, line_height=12, font="Helvetica", size=9, color=colors.darkgrey)
-        y -= 2
+        # Severity Text
+        c.setFillColor(sev_col)
+        c.setFont("Helvetica-Bold", 8)
+        c.drawString(margin_x + content_width - 50, y - 15, sev.upper())
         
-        # Recommendation
-        y = draw_wrapped_text(c, f"Recommandation : {fix}", margin_x + 10, y, max_width - 10, line_height=12, font="Helvetica", size=9, color=colors.darkgrey)
-        y -= 15
+        # Explanation (Justified)
+        p_expl.drawOn(c, margin_x + 15, y - 25 - h_expl)
+        
+        # Fix (Justified)
+        # Draw below explanation
+        p_fix.drawOn(c, margin_x + 15, y - 25 - h_expl - 10 - h_fix)
+        
+        y -= (card_height + 15)
         
     y -= 10
     
-    # 4. Infrastructure
-    c.setFont("Helvetica-Bold", 14)
-    c.setFillColor(colors.black)
-    c.drawString(margin_x, y, "Infrastructure")
+    # --- 5. BAS DE PAGE : INFRASTRUCTURE & CARTE DU SITE ---
+    # Check space
+    if y < 150:
+        c.showPage()
+        y = height - 50
+
+    # Two columns
+    col_width = (content_width / 2) - 10
+    left_col_x = margin_x
+    right_col_x = margin_x + col_width + 20
+    
+    # Save Y to align columns
+    start_y = y
+    
+    # LEFT: Infrastructure
+    c.setFillColor(primary_color)
+    c.setFont("Helvetica-Bold", 12)
+    c.drawString(left_col_x, y, "Infrastructure détectée")
     y -= 20
     
     infra = ai_summary.get("infrastructure", {})
-    infra_text = [
-        f"Hébergeur : {infra.get('hosting_provider') or 'N/A'}",
-        f"IP : {infra.get('ip') or 'N/A'}",
-        f"Issuer TLS : {infra.get('tls_issuer') or 'N/A'}",
-        f"Server : {infra.get('server_header') or 'N/A'}"
+    infra_items = [
+        ("Hébergeur", infra.get('hosting_provider') or 'N/A'),
+        ("IP", infra.get('ip') or 'N/A'),
+        ("Certificat TLS", infra.get('tls_issuer') or 'N/A'),
+        ("Serveur", infra.get('server_header') or 'N/A')
     ]
     
-    for line in infra_text:
-        c.setFont("Helvetica", 10)
-        c.drawString(margin_x, y, line)
-        y -= 14
+    for label, value in infra_items:
+        c.setFont("Helvetica-Bold", 9)
+        c.setFillColor(colors.gray)
+        c.drawString(left_col_x, y, label + ":")
         
-    y -= 20
-    
-    # 5. Site Map
-    c.setFont("Helvetica-Bold", 14)
-    c.drawString(margin_x, y, "Site Map")
+        c.setFont("Helvetica", 9)
+        c.setFillColor(primary_color)
+        c.drawString(left_col_x + 70, y, value[:30])
+        y -= 15
+        
+    # RIGHT: Site Map
+    y = start_y # Reset Y for right column
+    c.setFillColor(primary_color)
+    c.setFont("Helvetica-Bold", 12)
+    c.drawString(right_col_x, y, "Cartographie du site")
     y -= 20
     
     site_map = ai_summary.get("site_map", {})
-    total_pages = site_map.get("total_pages", 0)
     pages = site_map.get("pages", [])
     
-    c.setFont("Helvetica", 10)
-    c.drawString(margin_x, y, f"Pages détectées : {total_pages}")
-    y -= 14
+    c.setFont("Helvetica", 9)
+    c.setFillColor(text_color)
     
-    # List pages (limit to fit page)
-    max_pages_lines = 8
-    for i, page in enumerate(pages):
-        if i >= max_pages_lines:
-            c.drawString(margin_x, y, "... (voir rapport complet pour plus de détails)")
-            break
+    max_pages = 5
+    for i, page in enumerate(pages[:max_pages]):
+        # Truncate
+        display_url = page if len(page) < 55 else page[:52] + "..." # Increased truncate length due to wider page
+        c.drawString(right_col_x, y, f"- {display_url}")
+        y -= 14
         
-        # Truncate long URLs
-        display_url = page if len(page) < 80 else page[:77] + "..."
-        c.drawString(margin_x, y, f"- {display_url}")
-        y -= 12
+    if len(pages) > max_pages:
+        c.setFont("Helvetica-Oblique", 9)
+        c.setFillColor(colors.gray)
+        c.drawString(right_col_x, y, f"... et {len(pages) - max_pages} autres pages")
         
-        # Safety check for page bottom
-        if y < 30:
-            break
-            
+    # Footer Note
+    c.setFont("Helvetica", 8)
+    c.setFillColor(colors.gray)
+    c.drawCentredString(width/2, 30, "Généré par Relic v1.0.0 – Audit de Sécurité Automatisé")
+    
     c.save()
     buffer.seek(0)
     return buffer.getvalue()

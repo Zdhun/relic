@@ -35,9 +35,10 @@ class AiAnalyzer:
             }
         }
 
-    def analyze(self, system_prompt: str, user_prompt: str, provider: Optional[str] = None) -> str:
+    async def analyze(self, system_prompt: str, user_prompt: str, provider: Optional[str] = None) -> Any:
         """
         Sends prompts to the selected AI provider.
+        Returns an async generator yielding chunks of the response.
         If provider is None, tries Ollama first, then falls back to OpenRouter.
         """
         if provider == "ollama":

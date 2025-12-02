@@ -73,13 +73,6 @@ export default function ResultTabs({ result }: { result: ScanResult | null }) {
 
             <AiAnalysisSection scanId={result.scan_id} provider={selectedProvider} />
 
-            <a
-                href={`/api/scan/${result.scan_id}/pdf`}
-                target="_blank"
-                className="flex items-center justify-center gap-2 bg-terminal-accent text-black font-bold py-3 rounded hover:bg-terminal-accent/90 transition-colors"
-            >
-                <Download size={18} /> Download Executive Report
-            </a>
 
             {result.debug_info && (
                 <div className="space-y-4 pt-6 border-t border-terminal-border">

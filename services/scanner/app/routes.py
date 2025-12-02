@@ -9,6 +9,7 @@ from .policy import is_authorized
 from .sse import event_generator
 from .pdf import generate_pdf, generate_markdown, generate_ai_pdf
 from .ai.schema import build_ai_scan_view
+from .ai.utils import parse_ai_json
 from .config import settings
 import json
 
@@ -35,11 +36,11 @@ OUTPUT SCHEMA (MANDATORY):
   },
   "overall_risk_level": "Très faible | Faible | Moyen | Élevé | Critique",
   "executive_summary": "Texte en français, 3 à 6 phrases, paragraphe unique.",
-  "top_3_vulnerabilities": [
+  "key_vulnerabilities": [
     {
       "title": "Titre court de la vulnérabilité",
       "severity": "low | medium | high | critical",
-      "area": "TLS | Headers | CORS | Network | Cookies | Application | Authentication | Configuration",
+      "area": "TLS | Headers | CORS | Network | Cookies | Application | Authentication | Configuration | Exposure",
       "explanation_simple": "Explication en français, 1 à 3 phrases, vulgarisées mais techniquement correctes.",
       "fix_recommendation": "Recommandation concrète en français, 1 à 3 phrases, orientées action (ce que l'équipe doit faire)."
     }
@@ -94,9 +95,9 @@ DETAILED INSTRUCTIONS:
   - une conclusion claire sur le niveau de risque.
 - Style: ton professionnel, clair, sans jargon inutile.
 
-4) top_3_vulnerabilities
-- You MUST select up to 3 vulnerabilities from the scan findings.
-- Prioritize by severity, exploitability, importance.
+4) key_vulnerabilities
+- You MUST select up to 5 most critical vulnerabilities from the scan findings.
+- Prioritize by severity (Critical > High > Medium).
 - Do NOT invent new findings.
 - For each vulnerability:
   - "title": reformule le titre pour qu’il soit clair et court.
@@ -399,44 +400,66 @@ async def generate_scan_ai_analysis(scan_id: str, provider: str = None):
 Analyze this data and provide the security report in the requested JSON format.
 """
 
-        # Call AI Analyzer
+        # Call AI Analyzer (returns an async generator)
         from .ai.analyzer import analyzer
-        response_text = analyzer.analyze(system_prompt, user_prompt, provider)
+        response_generator = await analyzer.analyze(system_prompt, user_prompt, provider)
 
-        # Clean up response if it contains markdown code blocks
-        cleaned_response = response_text.strip()
-        if cleaned_response.startswith("```json"):
-            cleaned_response = cleaned_response[7:]
-        if cleaned_response.startswith("```"):
-            cleaned_response = cleaned_response[3:]
-        if cleaned_response.endswith("```"):
-            cleaned_response = cleaned_response[:-3]
-        cleaned_response = cleaned_response.strip()
+        # Resolve provider and model name in outer scope to avoid UnboundLocalError in closure
+        resolved_provider = provider if provider else "ollama"
+        resolved_model = settings.OLLAMA_MODEL if resolved_provider == "ollama" else settings.OPENROUTER_MODEL
+        model_name_str = f"{resolved_provider}:{resolved_model}"
 
-        # Parse JSON
-        try:
-            analysis_result = json.loads(cleaned_response)
-            
-            # Inject model name
-            actual_model = settings.OLLAMA_MODEL if provider == "ollama" else settings.OPENROUTER_MODEL
-            # If provider is None, it defaults to Ollama in analyzer, but we should check what analyzer actually used.
-            # The analyzer logic defaults to Ollama if provider is None.
-            if not provider:
-                provider = "ollama"
-                actual_model = settings.OLLAMA_MODEL
-            
-            analysis_result["model_name"] = f"{provider}:{actual_model}"
-            
-            return analysis_result
-        except json.JSONDecodeError as e:
-            print(f"Failed to parse AI response: {cleaned_response}")
-            raise HTTPException(status_code=500, detail=f"AI returned invalid JSON: {str(e)}")
+        async def stream_and_persist():
+            full_response_text = ""
+            try:
+                async for chunk in response_generator:
+                    full_response_text += chunk
+                    yield chunk
+                
+                # After streaming is done, parse and save
+                try:
+                    analysis_result = parse_ai_json(full_response_text)
+                    
+                    # Inject model name using captured variable
+                    analysis_result["model_name"] = model_name_str
+                    
+                    # Save analysis to scan result for persistence
+                    current_scan = store.get_scan(scan_id)
+                    if current_scan:
+                        if not current_scan.result_json:
+                            current_scan.result_json = {}
+                        current_scan.result_json["ai_analysis"] = analysis_result
+                        
+                        updated_result = ScanResult(**current_scan.result_json)
+                        store.save_scan_result(scan_id, updated_result)
+                        print(f"Successfully persisted AI analysis for scan {scan_id}")
+                    
+                except ValueError as e:
+                    print(f"Failed to parse/save AI response after streaming: {e}")
+                    
+            except asyncio.CancelledError:
+                print(f"Client disconnected during AI streaming for scan {scan_id}")
+                # We can try to save partial result if needed, but usually better to just stop
+                raise
+            except Exception as e:
+                print(f"Error during streaming: {e}")
+                yield f"\n\n[ERROR] Stream interrupted: {str(e)}"
 
+        return StreamingResponse(stream_and_persist(), media_type="text/plain")
+
+    except ValueError as e:
+        # Likely missing API key or configuration
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         print(f"ERROR in generate_scan_ai_analysis: {e}")
         import traceback
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Failed to generate AI analysis: {e}")
+        error_msg = str(e)
+        if "Connection refused" in error_msg or "ConnectError" in error_msg:
+             raise HTTPException(status_code=503, detail="Could not connect to AI provider. Is Ollama running?")
+        if "Read timed out" in error_msg or "Timeout" in error_msg:
+             raise HTTPException(status_code=504, detail="AI analysis timed out. The model took too long to respond.")
+        raise HTTPException(status_code=500, detail=f"Failed to generate AI analysis: {error_msg}")
 
 @router.get("/scans", response_model=list[ScanResponse])
 async def list_recent_scans():
@@ -455,6 +478,21 @@ async def get_scan_ai_report_pdf(scan_id: str, provider: str = None):
 
     try:
         raw_scan = scan.result_json
+
+        # Check if we already have the analysis saved
+        if raw_scan.get("ai_analysis"):
+            print(f"DEBUG: Reusing saved AI analysis for scan {scan_id}")
+            ai_summary = raw_scan["ai_analysis"]
+            
+            # Generate PDF
+            result_obj = ScanResult(**scan.result_json)
+            pdf_bytes = generate_ai_pdf(result_obj, ai_summary)
+            
+            return Response(
+                content=pdf_bytes, 
+                media_type="application/pdf", 
+                headers={"Content-Disposition": f"attachment; filename=ai_report_{scan_id}.pdf"}
+            )
 
         # Prepare data for AI view builder
         debug_info = raw_scan.get("debug_info")
@@ -484,21 +522,15 @@ Analyze this data and provide the security report in the requested JSON format.
 
         # Call AI Analyzer
         from .ai.analyzer import analyzer
-        response_text = analyzer.analyze(system_prompt, user_prompt, provider)
+        response_generator = await analyzer.analyze(system_prompt, user_prompt, provider)
+        
+        response_text = ""
+        async for chunk in response_generator:
+            response_text += chunk
 
-        # Clean up response
-        cleaned_response = response_text.strip()
-        if cleaned_response.startswith("```json"):
-            cleaned_response = cleaned_response[7:]
-        if cleaned_response.startswith("```"):
-            cleaned_response = cleaned_response[3:]
-        if cleaned_response.endswith("```"):
-            cleaned_response = cleaned_response[:-3]
-        cleaned_response = cleaned_response.strip()
-
-        # Parse JSON
+        # Parse JSON using robust utility
         try:
-            ai_summary = json.loads(cleaned_response)
+            ai_summary = parse_ai_json(response_text)
             
             # Inject model name
             actual_model = settings.OLLAMA_MODEL if provider == "ollama" else settings.OPENROUTER_MODEL
@@ -507,6 +539,17 @@ Analyze this data and provide the security report in the requested JSON format.
                 actual_model = settings.OLLAMA_MODEL
             ai_summary["model_name"] = f"{provider}:{actual_model}"
             
+            # Save analysis to scan result for persistence
+            if not scan.result_json:
+                scan.result_json = {}
+            scan.result_json["ai_analysis"] = ai_summary
+            
+            try:
+                updated_result = ScanResult(**scan.result_json)
+                store.save_scan_result(scan_id, updated_result)
+            except Exception as e:
+                print(f"Warning: Failed to save AI analysis to DB: {e}")
+
             # Generate PDF
             result_obj = ScanResult(**scan.result_json)
             pdf_bytes = generate_ai_pdf(result_obj, ai_summary)
@@ -517,12 +560,19 @@ Analyze this data and provide the security report in the requested JSON format.
                 headers={"Content-Disposition": f"attachment; filename=ai_report_{scan_id}.pdf"}
             )
             
-        except json.JSONDecodeError as e:
-            print(f"Failed to parse AI response: {cleaned_response}")
+        except ValueError as e:
+            # parse_ai_json already logs the error
             raise HTTPException(status_code=500, detail=f"AI returned invalid JSON: {str(e)}")
 
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         print(f"ERROR in get_scan_ai_report_pdf: {e}")
         import traceback
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Failed to generate AI PDF: {e}")
+        error_msg = str(e)
+        if "Connection refused" in error_msg or "ConnectError" in error_msg:
+             raise HTTPException(status_code=503, detail="Could not connect to AI provider. Is Ollama running?")
+        if "Read timed out" in error_msg or "Timeout" in error_msg:
+             raise HTTPException(status_code=504, detail="AI analysis timed out. The model took too long to respond.")
+        raise HTTPException(status_code=500, detail=f"Failed to generate AI PDF: {error_msg}")
