@@ -34,45 +34,7 @@ Le projet est conçu comme un monorepo moderne, séparant clairement le frontend
 **Flux de données (Pipeline de Scan) :**
 
 ```mermaid
-flowchart TD
-    subgraph Client ["Client Layer"]
-        User([User / CLI])
-        WebUI([Web Interface])
-    end
-
-    subgraph Engine ["Core Engine (Python)"]
-        Orchestrator{Orchestrator}
-        NetScan[Network Scanner]
-        WebScan[HTTP & Vuln Scanner]
-        Crawler[Crawler]
-        RawData[(Raw JSON Data)]
-    end
-
-    subgraph AI ["Intelligence Layer"]
-        Prompt[Prompt Engineering]
-        LLM[LLM Analysis]
-    end
-
-    subgraph Output ["Reporting"]
-        PDF[PDF Generator]
-        Report(Final Report)
-    end
-
-    User & WebUI -->|Start Scan| Orchestrator
-    Orchestrator -->|1. Recon| NetScan
-    Orchestrator -->|2. Crawl| Crawler
-    Orchestrator -->|3. Audit| WebScan
-    NetScan & Crawler & WebScan --> RawData
-    RawData -->|4. Context| Prompt
-    Prompt -->|5. Inference| LLM
-    LLM -->|6. Summary| PDF
-    RawData -->|7. Metrics| PDF
-    PDF --> Report
-
-    style Client fill:#f9f,stroke:#333,stroke-width:2px
-    style Engine fill:#bbf,stroke:#333,stroke-width:2px
-    style AI fill:#bfb,stroke:#333,stroke-width:2px
-    style Output fill:#fbb,stroke:#333,stroke-width:2px
+![Rapport WebTech 104](assets/pipeline.png)
 ```
 
 1.  **Input** : L'utilisateur lance un scan via le Web ou le CLI.
@@ -92,11 +54,15 @@ C'est le point fort du projet pour l'expérience utilisateur.
 - **Rapport IA intégré** : Lecture directe de la synthèse, du score et des recommandations.
 - **Téléchargement PDF** : Récupération du rapport final en un clic.
 
+![Interface Web](assets/web_ui.png)
+
 ### 2. Outil CLI (Command Line)
 Pour l'intégration CI/CD ou l'usage serveur.
 - **Scan "headless"** : Exécution complète sans interface graphique.
 - **Mode Interactif** : Prompt utilisateur si aucune cible n'est fournie.
 - **Rapport PDF** : Génération identique à la version Web.
+
+![CLI Scan](assets/cli_scan.png)
 
 ### 3. Moteur de Scan (Scanner Engine)
 Le cœur technique (`services/scanner`) implémente les vérifications suivantes :
@@ -208,3 +174,19 @@ Ce projet est un prototype avancé, mais il a ses limites par rapport à des out
 - **IA** : La qualité du rapport dépend du modèle utilisé.
     - **Ollama (Local)** : Moins puissant que les modèles cloud géants (GPT-5), mais offre une **confidentialité totale des données** (aucune donnée ne quitte votre infrastructure), ce qui est crucial en contexte de cybersécurité sensible.
     - **OpenRouter (Cloud)** : Plus performant pour la synthèse, mais implique l'envoi de métadonnées de scan à un tiers.
+
+---
+
+## Exemples de Résultats
+
+Pour valider l'outil, j'ai effectué des tests sur des environnements contrôlés :
+
+1.  **[Relic Test Lab](https://relic-test-lab.vercel.app)** : Un site volontairement vulnérable (failles XSS, headers manquants, secrets exposés) créé spécifiquement pour démontrer les capacités de détection de Relic.
+    
+    ![Rapport Relic Test Lab](assets/report_relic_test_lab.png)
+
+2.  **[WebTech 104](https://webtech-104.vercel.app)** : Un projet étudiant que j'ai réalisé avec un camarade dans le cadre d'un projet de cours à l'ECE utilisé comme cible "standard" pour vérifier le comportement sur une application Next.js classique.
+
+    ![Rapport WebTech 104](assets/report_webtech_104.png)
+
+> **Note** : Cet outil a été testé exclusivement sur mes propres infrastructures et sur des projets open-source autorisés. Aucune cible non autorisée n'a été scannée durant le développement.
