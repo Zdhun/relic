@@ -33,9 +33,7 @@ Le projet est conçu comme un monorepo moderne, séparant clairement le frontend
 
 **Flux de données (Pipeline de Scan) :**
 
-```mermaid
-![Rapport WebTech 104](assets/pipeline.png)
-```
+![pipeline Scan](assets/pipeline.png)
 
 1.  **Input** : L'utilisateur lance un scan via le Web ou le CLI.
 2.  **Engine** : Le moteur Python orchestre les modules de scan (réseau, HTTP, vulnérabilités).
