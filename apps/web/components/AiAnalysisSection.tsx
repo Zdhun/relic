@@ -7,7 +7,6 @@ interface AiAnalysisSectionProps {
 }
 
 export default function AiAnalysisSection({ scanId, provider }: AiAnalysisSectionProps) {
-    // Use any for analysis to avoid strict type checking on the raw response
     const [analysis, setAnalysis] = useState<any | null>(null);
     const [loading, setLoading] = useState(false);
     const [isDownloading, setIsDownloading] = useState(false);

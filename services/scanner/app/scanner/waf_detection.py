@@ -19,13 +19,7 @@ def detect_waf_and_visibility(scan_debug_info: Dict[str, Any]) -> Dict[str, Opti
     http_traffic = scan_debug_info.get("http_traffic", [])
     
     if not http_traffic:
-        # If no traffic at all, it's likely an error or host unreachable, 
-        # but from a WAF perspective we can't say much. 
-        # However, if the scan failed before HTTP, this function might not even be called 
-        # or it might be called with empty list.
-        # Let's assume "ok" but visibility "none" if we really have no data, 
-        # or maybe it's better to rely on the caller to handle empty traffic.
-        # But per spec, we return default "ok" if not blocked.
+        # No traffic detected, return default safe values
         return {
             "scan_status": "ok",
             "blocking_mechanism": None,
@@ -37,9 +31,9 @@ def detect_waf_and_visibility(scan_debug_info: Dict[str, Any]) -> Dict[str, Opti
     challenge_headers_detected = False
     detected_mechanism = None
     
-    # Heuristics for blocking
-    # 1. Status codes: 403, 401, 429 are strong indicators of blocking if prevalent.
-    # 2. Headers: Specific headers like x-vercel-mitigated.
+    # Heuristics for blocking:
+    # 1. High rate of 403/401/429 status codes
+    # 2. Presence of specific blocking headers (e.g., x-vercel-mitigated)
     
     # We'll count "successful" (2xx/3xx) vs "blocked" (403/401/429)
     
@@ -47,8 +41,6 @@ def detect_waf_and_visibility(scan_debug_info: Dict[str, Any]) -> Dict[str, Opti
     blocked_count = 0
     
     # Track if we found any "application" 200 OK (not just challenge page)
-    # Challenge pages often return 403, but sometimes 200 with specific content.
-    # Vercel challenge usually returns 403.
     found_app_200 = False
     
     for entry in http_traffic:
@@ -169,21 +161,4 @@ def detect_waf_and_visibility(scan_debug_info: Dict[str, Any]) -> Dict[str, Opti
             "visibility_level": visibility
         }
 
-# Scenarios:
-# 1. Normal Site:
-#    - 10 requests: 8x 200 OK, 2x 404 Not Found.
-#    - blocked_count = 0. Ratio = 0.0.
-#    - No challenge headers.
-#    -> scan_status="ok", blocking_mechanism=None, visibility_level="good"
 
-# 2. Vercel Challenge:
-#    - 5 requests: All 403 Forbidden.
-#    - Headers contain "x-vercel-mitigated": "challenge".
-#    - challenge_headers_detected = True.
-#    -> scan_status="blocked_by_waf", blocking_mechanism="vercel_challenge", visibility_level="none"
-
-# 3. Generic WAF (Aggressive):
-#    - 20 requests: 1x 200 (homepage), 19x 403 (scans).
-#    - blocked_count = 19. Ratio = 0.95 (> 0.8).
-#    - No specific headers.
-#    -> scan_status="blocked_by_waf", blocking_mechanism="generic_waf", visibility_level="very_low"

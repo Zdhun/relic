@@ -25,10 +25,6 @@ export async function getAiDebug(scanId: string): Promise<any> {
 }
 
 export async function getAiProviderStatus(): Promise<any> {
-    // Note: This endpoint is under /api/ai/providers/status, not /api/scan/...
-    // We need to adjust the base URL or use absolute path if BASE_URL is specific to scans
-    // Assuming BASE_URL is http://localhost:3000/api/scan, we need to go up.
-    // Actually, let's just use the relative path /api/ai/providers/status which will be proxied.
     const res = await fetch(`/api/ai/providers/status`);
     if (!res.ok) throw new Error("Failed to fetch AI provider status");
     return res.json();

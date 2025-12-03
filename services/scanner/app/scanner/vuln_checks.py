@@ -62,7 +62,7 @@ async def check_xss_url(url: str, http_client: HttpClient, log_callback: Callabl
     findings = []
     evidence_list = []
     
-    # 1. Strategy based on classification
+    # Strategy based on classification
     if classification == EndpointClass.STATIC_ASSET:
         return findings, evidence_list
     
@@ -72,7 +72,7 @@ async def check_xss_url(url: str, http_client: HttpClient, log_callback: Callabl
             await log_callback("INFO", f"Skipping XSS check on AUTH_SSO: {url}")
         return findings, evidence_list
 
-    # 2. Prepare Detector
+    # Prepare Detector
     detector = XSSDetector()
     canary_token = ''.join(random.choices(string.ascii_letters + string.digits, k=6))
     payloads = detector.generate_payloads(canary_token)
@@ -183,7 +183,7 @@ async def check_sqli_url(url: str, http_client: HttpClient, log_callback: Callab
 
     for base_url, params in params_map.items():
         for param in params:
-            # 1. Error-based checks
+            # Error-based checks
             for payload in error_payloads:
                 test_url = f"{base_url}?{param}={urllib.parse.quote(payload)}"
                 try:
@@ -209,7 +209,7 @@ async def check_sqli_url(url: str, http_client: HttpClient, log_callback: Callab
                 except Exception: pass
             if findings: break
 
-            # 2. Time-based checks (Rigorous)
+            # Time-based checks (Rigorous)
             # Measure baseline
             baseline_latencies = []
             try:
@@ -272,11 +272,9 @@ async def check_sqli_url(url: str, http_client: HttpClient, log_callback: Callab
 
 async def check_xss(target: str, http_client: HttpClient, log_callback: Callable[[str, str], Awaitable[None]] = None, discovered_urls: List[str] = None) -> tuple[List[Finding], Dict[str, any]]:
     """
-    Legacy wrapper for check_xss.
+    Wrapper for check_xss.
     """
-    # ... (simplified implementation calling check_xss_url)
-    # For refactoring, we focus on the helpers. The engine calls helpers directly now.
-    # But to keep compatibility if needed:
+    # Simplified implementation calling check_xss_url
     findings = []
     evidence = []
     urls = [target] + (discovered_urls or [])
@@ -288,7 +286,7 @@ async def check_xss(target: str, http_client: HttpClient, log_callback: Callable
 
 async def check_sqli(target: str, http_client: HttpClient, log_callback: Callable[[str, str], Awaitable[None]] = None, discovered_urls: List[str] = None) -> tuple[List[Finding], Dict[str, any]]:
     """
-    Legacy wrapper for check_sqli.
+    Wrapper for check_sqli.
     """
     findings = []
     evidence = []

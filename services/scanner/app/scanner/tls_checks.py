@@ -12,13 +12,10 @@ def check_tls(hostname: str, port: int = 443) -> tuple[List[Finding], Optional[D
     findings = []
     cert_info = None
     
-    # print(f"DEBUG: check_tls start for {hostname}:{port}")
+
     
     try:
-        # Combined check: Get cert and version in one go if possible, 
-        # but we need CERT_NONE for version check sometimes if cert is bad, 
-        # and CERT_OPTIONAL/REQUIRED for getpeercert().
-        # Let's do one robust pass with CERT_OPTIONAL which allows both usually.
+        # Configure SSL context to allow optional certificates for broader compatibility
         
         ctx = ssl.create_default_context()
         ctx.check_hostname = False
@@ -87,8 +84,7 @@ def check_tls(hostname: str, port: int = 443) -> tuple[List[Finding], Optional[D
                             ))
 
     except Exception as e:
-        # print(f"DEBUG: check_tls error: {e}")
         pass
         
-    # print(f"DEBUG: check_tls end")
+
     return findings, cert_info

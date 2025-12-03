@@ -140,31 +140,7 @@ async def run_scan_task(scan_id: str, target: str):
     """Runs the real scan using ScanEngine."""
     engine = ScanEngine()
     
-    # We don't need to init logs in store, as we append them or store at end.
-    # For SSE, we might need a way to stream logs.
-    # The current SSE implementation likely polls the `scans` dict.
-    # We need to check `sse.py` to see how it works.
-    # If it polls, we need to update it to poll the DB or use a different mechanism.
-    # For now, let's assume we update the DB with logs periodically or just at the end?
-    # The user wants "Persistence", but SSE needs real-time.
-    # If we write to DB on every log, it might be slow for SQLite?
-    # Actually SQLite is fast enough for this scale.
-    # Let's define a log callback that updates the DB or an in-memory buffer for SSE?
-    # Wait, the prompt says "Replace the in-memory storage with a lightweight SQLite-backed persistence layer".
-    # But SSE needs to read live updates.
-    # If `sse.py` reads from `scans`, we need to update `sse.py` too.
-    # Let's check `sse.py` in the next step. For now, I will write the task logic assuming `store` handles updates.
-
-    # To support SSE without changing `sse.py` too much (if it takes a dict), we might need to adapt.
-    # But `sse.py` takes `scans` dict. We should probably update `sse.py` to take `scan_id` and query DB.
-
-    # Let's implement the task to update DB at the end for the result,
-    # and maybe we can keep a small in-memory buffer for active scans for SSE?
-    # Or just write to DB.
-
-    # Actually, for this iteration, let's focus on persistence.
-    # I'll implement the task to save the final result.
-
+    # Initialize log buffer and callback for real-time updates
     logs_buffer = []
 
     async def log_callback(entry: ScanLogEntry):
@@ -180,7 +156,6 @@ async def run_scan_task(scan_id: str, target: str):
 
     # Run the scan
     try:
-        # Update status to running (already done in start_scan but good to confirm)
         store.update_scan_status(scan_id, "running")
 
         result = await engine.run_scan(target, log_callback)
@@ -249,8 +224,7 @@ async def scan_events(scan_id: str):
     if not scan:
         raise HTTPException(status_code=404, detail="Scan not found")
 
-    # We need to update event_generator to work with DB or handle it differently
-    # For now, pass the store function or similar
+    # Stream events using the generator
     return StreamingResponse(
         event_generator(scan_id, store),
         media_type="text/event-stream",
@@ -329,20 +303,12 @@ async def get_scan_ai_debug(scan_id: str):
 
     try:
         raw_scan = scan.result_json
-        print(f"DEBUG: raw_scan keys: {list(raw_scan.keys())}")
         if "debug_info" in raw_scan:
-            print(f"DEBUG: debug_info type: {type(raw_scan['debug_info'])}")
-            if isinstance(raw_scan['debug_info'], dict):
-                print(f"DEBUG: debug_info keys: {list(raw_scan['debug_info'].keys())}")
+             pass
 
         # Prepare data for AI view builder
-        # We need to merge debug_info (which contains the details) with top-level fields
-        debug_info = raw_scan.get("debug_info")
-        if debug_info is None:
-            debug_info = {}
-            print("DEBUG: debug_info is None")
-        elif not isinstance(debug_info, dict):
-            print(f"DEBUG: debug_info is not a dict, it is {type(debug_info)}")
+        debug_info = raw_scan.get("debug_info", {})
+        if not isinstance(debug_info, dict):
             debug_info = {}
 
         ai_input = debug_info.copy()
@@ -356,10 +322,7 @@ async def get_scan_ai_debug(scan_id: str):
         ai_input["visibility_level"] = raw_scan.get("visibility_level")
         ai_input["findings"] = raw_scan.get("findings")
 
-        print(f"DEBUG: ai_input keys passed to builder: {list(ai_input.keys())}")
-
         ai_view = build_ai_scan_view(ai_input)
-        print(f"DEBUG: ai_view result keys: {list(ai_view.keys())}")
 
         return {
             "scan_id": scan_id,
@@ -499,7 +462,6 @@ async def get_scan_ai_report_pdf(scan_id: str, provider: str = None):
 
         # Check if we already have the analysis saved
         if raw_scan.get("ai_analysis"):
-            print(f"DEBUG: Reusing saved AI analysis for scan {scan_id}")
             ai_summary = raw_scan["ai_analysis"]
             
             # Generate PDF

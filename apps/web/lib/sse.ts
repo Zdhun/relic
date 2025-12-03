@@ -11,7 +11,7 @@ export function useScanLogs(scanId: string | null) {
         setLogs([]);
         setStatus("running");
 
-        // Direct connection to backend to avoid Next.js proxy buffering
+        // Connect directly to backend
         const eventSource = new EventSource(`http://localhost:8000/scan/${scanId}/events`);
 
         eventSource.onmessage = (event) => {
@@ -21,7 +21,7 @@ export function useScanLogs(scanId: string | null) {
         eventSource.addEventListener("log", (e) => {
             try {
                 const data = JSON.parse(e.data);
-                // Robust parsing with fallbacks
+                // Parse log entry
                 const log: ScanLog = {
                     ts: data.timestamp || data.ts || new Date().toISOString(),
                     level: data.level || "INFO",

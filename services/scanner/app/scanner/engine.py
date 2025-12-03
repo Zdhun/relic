@@ -50,7 +50,7 @@ class ScanEngine:
             
             await log("INFO", f"Starting scan for target: {target_input}")
 
-            # 1. Normalization
+            # Normalization
             try:
                 target_info = normalize_target(target_input)
                 await log("INFO", f"Normalized target: {target_info.full_url}")
@@ -137,7 +137,7 @@ class ScanEngine:
                 await log("ERROR", f"Parallel checks failed: {e}")
                 return self._build_error_result(target_info.full_url, logs, start_time, str(e))
 
-            # 4. TLS Checks
+            # TLS Checks
             tls_details = None
             final_scheme = response.url.scheme
             final_host = response.url.host
@@ -162,13 +162,13 @@ class ScanEngine:
                 except Exception as e:
                     await log("ERROR", f"TLS check failed: {e}")
             
-            # 5. Header Checks
+            # Header Checks
             await log("INFO", "Analyzing HTTP headers...")
             header_findings = check_security_headers(response.headers)
             if header_findings:
                 findings.extend(header_findings)
 
-            # 6. Cookie Checks
+            # Cookie Checks
             await log("INFO", "Analyzing cookies...")
             cookies_list, cookies_summary, cookie_findings = analyze_cookies(self.http_client.history)
             cookies_debug = {"cookies": cookies_list, "cookies_summary": cookies_summary}
@@ -183,7 +183,7 @@ class ScanEngine:
             if cors_findings:
                 findings.extend(cors_findings)
 
-            # 7. Streaming Crawler & Vuln Checks
+            # Streaming Crawler & Vuln Checks
             discovery_results = []
             discovered_paths = []
             checks_outcomes = []
