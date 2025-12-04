@@ -24,20 +24,13 @@ def draw_paragraph(c, text, x, y, max_width, style=None):
     return y - h
 
 def generate_pdf(result: ScanResult) -> bytes:
-    # ... (Keep existing generate_pdf implementation if needed, or update it too. 
-    # The user specifically asked about the AI report which is likely generate_ai_pdf based on context, 
-    # but let's update generate_ai_pdf primarily as that's the one with "Synthèse Exécutive")
-    # For brevity in this tool call, I will focus on generate_ai_pdf and helper functions.
-    # But I need to provide the full file content or careful chunks.
-    # I will replace the whole file content to be safe and consistent.
-    
     buffer = BytesIO()
     c = canvas.Canvas(buffer, pagesize=A4)
     width, height = A4
-    
+
     # Helper to track Y position
     y = height - 50
-    
+
     def check_page_break(current_y, needed=50):
         nonlocal y
         if current_y < needed:
@@ -49,81 +42,118 @@ def generate_pdf(result: ScanResult) -> bytes:
     # Header
     c.setFillColor(colors.black)
     c.setFont("Helvetica-Bold", 24)
-    c.drawString(50, y, "AuditAI Executive Summary")
+    c.drawString(50, y, "AuditAI Technical Report")
     y -= 30
-    
+
     c.setFont("Helvetica", 12)
     c.drawString(50, y, f"Target: {result.target}")
     y -= 20
-    c.drawString(50, y, f"Date: {result.scanned_at.strftime('%Y-%m-%d %H:%M:%S')}")
+    c.drawString(50, y, f"Date: {result.timestamp.strftime('%Y-%m-%d %H:%M:%S')}")
     y -= 20
     if result.response_time_ms:
         c.drawString(50, y, f"Duration: {result.response_time_ms / 1000:.2f}s")
         y -= 20
-    
-    # Score
+
+    # Score & Grade
     c.setFont("Helvetica-Bold", 48)
     c.setFillColor(colors.darkblue)
     c.drawString(width - 150, height - 80, f"{result.grade}")
     c.setFont("Helvetica", 12)
     c.drawString(width - 150, height - 100, f"Score: {result.score}/100")
-    
+
     y -= 20
     c.setStrokeColor(colors.gray)
     c.line(50, y, width - 50, y)
     y -= 30
-    
+
     # Summary Stats
     c.setFillColor(colors.black)
     c.setFont("Helvetica-Bold", 14)
     c.drawString(50, y, "Vulnerability Summary")
     y -= 20
-    
+
     severity_counts = {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}
+    owasp_counts = {}
+
     for f in result.findings:
         if f.severity in severity_counts:
             severity_counts[f.severity] += 1
-            
+        for ref in f.owasp_refs:
+            code = ref.split(":")[0] if ":" in ref else ref
+            owasp_counts[code] = owasp_counts.get(code, 0) + 1
+
     c.setFont("Helvetica", 12)
     stats_x = 50
     for sev, count in severity_counts.items():
         if count > 0:
             c.drawString(stats_x, y, f"{sev.title()}: {count}")
             stats_x += 100
-    y -= 40
-    
+    y -= 30
+
+    # OWASP Summary
+    if owasp_counts:
+        c.setFont("Helvetica-Bold", 12)
+        c.drawString(50, y, "OWASP Top 10 Distribution:")
+        y -= 20
+        c.setFont("Helvetica", 10)
+        owasp_x = 50
+        for code, count in owasp_counts.items():
+            text = f"{code}: {count}"
+            if owasp_x + c.stringWidth(text) > width - 50:
+                y -= 15
+                owasp_x = 50
+            c.drawString(owasp_x, y, text)
+            owasp_x += 80
+        y -= 30
+
     # Findings
     c.setFont("Helvetica-Bold", 16)
     c.drawString(50, y, "Detailed Findings")
     y -= 30
-    
+
     if not result.findings:
         c.setFont("Helvetica", 12)
         c.drawString(50, y, "No vulnerabilities found.")
         y -= 20
-    
+
     for finding in result.findings:
-        y = check_page_break(y, 100)
-        
+        y = check_page_break(y, 120)
+
         c.setFillColor(colors.black)
         c.setFont("Helvetica-Bold", 12)
         c.drawString(50, y, f"{finding.title} ({finding.severity.upper()})")
         y -= 20
-        
+
         c.setFont("Helvetica", 10)
         c.setFillColor(colors.darkgray)
-        c.drawString(50, y, f"Category: {finding.category}")
+
+        # Meta info line
+        meta_info = f"Category: {finding.category}"
+        if finding.scope:
+            meta_info += f" | Scope: {finding.scope}"
+        if finding.location:
+            # Truncate location if too long
+            loc = finding.location
+            if len(loc) > 50: loc = loc[:47] + "..."
+            meta_info += f" | Loc: {loc}"
+
+        c.drawString(50, y, meta_info)
         y -= 15
-        c.drawString(50, y, f"Description: {finding.description[:100]}...") 
+
+        if finding.owasp_refs:
+            c.drawString(50, y, f"OWASP: {', '.join(finding.owasp_refs)}")
+            y -= 15
+
+        c.drawString(50, y, f"Description: {finding.description[:100]}...")
         y -= 15
         c.drawString(50, y, f"Recommendation: {finding.recommendation[:100]}...")
         y -= 30
-        
+
     # Footer
     c.setFont("Helvetica-Oblique", 8)
     c.setFillColor(colors.gray)
     c.drawString(50, 30, "Generated by AuditAI - Authorized Testing Only")
-    
+
     c.save()
     buffer.seek(0)
     return buffer.getvalue()
@@ -154,7 +184,7 @@ def draw_gradient_header(c, x, y, width, height, start_color, end_color):
     # Interpolate between start_color and end_color
     r1, g1, b1 = start_color.red, start_color.green, start_color.blue
     r2, g2, b2 = end_color.red, end_color.green, end_color.blue
-    
+
     steps = int(height)
     for i in range(steps):
         ratio = i / steps
@@ -170,22 +200,22 @@ def draw_circular_score(c, x, y, score, grade, radius=30):
     c.setLineWidth(4)
     c.setStrokeColor(colors.HexColor('#334155')) # Slate 700
     c.circle(x, y, radius, stroke=1, fill=0)
-    
+
     # Foreground arc (progress)
     # 0 degrees is 3 o'clock, goes counter-clockwise
     # We want to start at 12 o'clock (90 deg) and go clockwise (negative angle)
-    
+
     # Calculate color based on score
     if score >= 80: score_color = colors.HexColor('#10B981') # Emerald 500
     elif score >= 60: score_color = colors.HexColor('#F59E0B') # Amber 500
     else: score_color = colors.HexColor('#EF4444') # Red 500
-    
+
     c.setStrokeColor(score_color)
     # Extent is proportional to score (360 * score / 100)
     extent = -3.6 * score
     # Start at 90 (top)
     c.arc(x - radius, y - radius, x + radius, y + radius, 90, extent)
-    
+
     # Grade in center
     c.setFillColor(colors.white)
     c.setFont("Helvetica-Bold", 28)
@@ -193,7 +223,7 @@ def draw_circular_score(c, x, y, score, grade, radius=30):
     text_width = c.stringWidth(grade, "Helvetica-Bold", 28)
     # Moved up slightly (y - 8 instead of y - 10)
     c.drawString(x - (text_width / 2), y - 8, grade)
-    
+
     # Score below grade
     c.setFont("Helvetica", 10)
     c.setFillColor(colors.HexColor('#94A3B8')) # Slate 400
@@ -204,86 +234,86 @@ def generate_ai_pdf(scan_result: ScanResult, ai_summary: dict) -> bytes:
     buffer = BytesIO()
     c = canvas.Canvas(buffer, pagesize=A4)
     width, height = A4
-    
+
     # --- Professional Palette (Blue/Purple SaaS Theme) ---
     col_header_start = colors.HexColor('#1e1b4b') # Indigo 950
     col_header_end = colors.HexColor('#4c1d95')   # Violet 900
-    
+
     col_bg_card = colors.HexColor('#FFFFFF')   # White (Cards)
     col_text_main = colors.HexColor('#0f172a') # Slate 900
     col_text_light = colors.HexColor('#475569')# Slate 600
     col_border = colors.HexColor('#E2E8F0')    # Slate 200
     col_accent = colors.HexColor('#6366f1')    # Indigo 500
-    
+
     # Margins
     margin_x = 30
     content_width = width - (2 * margin_x)
-    
+
     # --- 1. HEADER (Gradient) ---
     header_height = 110
     # Draw gradient from bottom to top of header
     draw_gradient_header(c, 0, height - header_height, width, header_height, col_header_end, col_header_start)
-    
+
     y = height - 35
-    
+
     # Logo / Title Area
     c.setFillColor(colors.white)
     c.setFont("Helvetica-Bold", 22)
     c.drawString(margin_x, y, "Rapport d'Audit de Sécurité")
-    
+
     y -= 25
     c.setFont("Helvetica", 12)
     c.setFillColor(colors.HexColor('#cbd5e1')) # Slate 300
     c.drawString(margin_x, y, f"Cible : {scan_result.target}")
     y -= 18
-    c.drawString(margin_x, y, f"Date : {scan_result.scanned_at.strftime('%Y-%m-%d %H:%M')}")
-    
+    c.drawString(margin_x, y, f"Date : {scan_result.timestamp.strftime('%Y-%m-%d %H:%M')}")
+
     # Score Gauge (Right side of header)
     score_num = ai_summary.get("global_score", {}).get("numeric", 0)
     score_letter = ai_summary.get("global_score", {}).get("letter", "?")
-    
+
     draw_circular_score(c, width - 60, height - 55, score_num, score_letter)
-    
+
     # Reset Y for content
     y = height - header_height - 25
-    
+
     # Styles
     styles = getSampleStyleSheet()
     summary_style = ParagraphStyle(
-        'Summary', parent=styles['Normal'], fontName='Helvetica', fontSize=10, 
+        'Summary', parent=styles['Normal'], fontName='Helvetica', fontSize=10,
         leading=14, textColor=col_text_main, alignment=TA_JUSTIFY
     )
     finding_style = ParagraphStyle(
-        'Finding', parent=styles['Normal'], fontName='Helvetica', fontSize=9, 
+        'Finding', parent=styles['Normal'], fontName='Helvetica', fontSize=9,
         leading=12, textColor=col_text_main, alignment=TA_JUSTIFY
     )
-    
+
     # --- 2. SYNTHÈSE EXÉCUTIVE ---
     c.setFillColor(col_text_main)
     c.setFont("Helvetica-Bold", 16)
     c.drawString(margin_x, y, "Synthèse Exécutive")
     y -= 8
-    
+
     # Draw line
     c.setStrokeColor(col_accent)
     c.setLineWidth(3)
     c.line(margin_x, y, margin_x + 40, y) # Accent line
     y -= 20
-    
+
     exec_summary = clean_text(ai_summary.get("executive_summary", "No summary provided."))
-    
+
     # Background for summary
     p_summary = Paragraph(exec_summary, summary_style)
     w_sum, h_sum = p_summary.wrap(content_width - 20, 1000)
-    
+
     c.setFillColor(colors.HexColor('#f8fafc')) # Slate 50
     c.setStrokeColor(col_border)
     c.setLineWidth(1)
     c.roundRect(margin_x, y - h_sum - 20, content_width, h_sum + 20, 6, fill=1, stroke=1)
-    
+
     p_summary.drawOn(c, margin_x + 10, y - 10 - h_sum)
     y -= (h_sum + 45)
-    
+
     # --- 3. TOP VULNÉRABILITÉS ---
     c.setFillColor(col_text_main)
     c.setFont("Helvetica-Bold", 16)
@@ -293,93 +323,93 @@ def generate_ai_pdf(scan_result: ScanResult, ai_summary: dict) -> bytes:
     c.setLineWidth(3)
     c.line(margin_x, y, margin_x + 40, y)
     y -= 20
-    
+
     top_vulns = ai_summary.get("key_vulnerabilities", [])
     if not top_vulns:
         top_vulns = ai_summary.get("top_3_vulnerabilities", [])
-        
+
     if not top_vulns:
         c.setFont("Helvetica-Oblique", 10)
         c.setFillColor(col_text_light)
         c.drawString(margin_x, y, "Aucune vulnérabilité critique détectée.")
         y -= 20
-        
+
     for vuln in top_vulns[:3]:
         expl = clean_text(vuln.get("explanation_simple", ""))
         fix = clean_text(vuln.get("fix_recommendation", ""))
-        
+
         # Prepare Paragraphs
         p_expl = Paragraph(expl, finding_style)
         w_expl, h_expl = p_expl.wrap(content_width - 40, 1000)
-        
+
         fix_text = f"<font color='#10B981'><b>Correction :</b></font> {fix}"
         p_fix = Paragraph(fix_text, finding_style)
         w_fix, h_fix = p_fix.wrap(content_width - 40, 1000)
-        
+
         card_height = h_expl + h_fix + 50
-        
+
         # Check page break - aggressive check to keep on one page if possible
         # If we are very low, we must break
         if y - card_height < 40:
             c.showPage()
             y = height - 50
-        
+
         # Card Background
         c.setFillColor(col_bg_card)
         c.setStrokeColor(col_border)
         c.setLineWidth(1)
         c.roundRect(margin_x, y - card_height, content_width, card_height, 6, fill=1, stroke=1)
-        
+
         # Severity Bar
         sev = vuln.get("severity", "low")
         sev_col = get_severity_color(sev)
         c.setFillColor(sev_col)
         c.rect(margin_x, y - card_height, 6, card_height, fill=1, stroke=0)
-        
+
         # Title
         c.setFillColor(col_text_main)
         c.setFont("Helvetica-Bold", 11)
         c.drawString(margin_x + 20, y - 18, clean_text(vuln.get("title", "Untitled")))
-        
+
         # Severity Badge (Right)
         c.setFillColor(sev_col)
         c.setFont("Helvetica-Bold", 9)
         sev_text = sev.upper()
         c.drawRightString(margin_x + content_width - 15, y - 18, sev_text)
-        
+
         # Content
         p_expl.drawOn(c, margin_x + 20, y - 28 - h_expl)
         p_fix.drawOn(c, margin_x + 20, y - 28 - h_expl - 8 - h_fix)
-        
+
         y -= (card_height + 12)
-        
+
     y -= 5
-    
+
     # --- 4. INFRASTRUCTURE & SITE MAP ---
     # Try to fit on same page if space permits (need ~120px)
     if y < 120:
         c.showPage()
         y = height - 50
-        
+
     # Container for bottom section
     container_height = 120
     c.setFillColor(colors.HexColor('#f1f5f9')) # Slate 100
     c.setStrokeColor(colors.HexColor('#e2e8f0'))
     c.roundRect(margin_x, y - container_height, content_width, container_height, 6, fill=1, stroke=0)
-    
+
     # Columns
     col_width = (content_width / 2) - 20
     left_x = margin_x + 15
     right_x = margin_x + col_width + 30
-    
+
     curr_y = y - 20
-    
+
     # Left: Infra
     c.setFillColor(col_text_main)
     c.setFont("Helvetica-Bold", 11)
     c.drawString(left_x, curr_y, "Infrastructure")
     curr_y -= 18
-    
+
     infra = ai_summary.get("infrastructure", {})
     infra_items = [
         ("Hébergeur", infra.get('hosting_provider') or 'N/A'),
@@ -387,7 +417,7 @@ def generate_ai_pdf(scan_result: ScanResult, ai_summary: dict) -> bytes:
         ("Certificat", infra.get('tls_issuer') or 'N/A'),
         ("Serveur", infra.get('server_header') or 'N/A')
     ]
-    
+
     for label, value in infra_items:
         c.setFont("Helvetica-Bold", 9)
         c.setFillColor(col_text_light)
@@ -396,62 +426,59 @@ def generate_ai_pdf(scan_result: ScanResult, ai_summary: dict) -> bytes:
         c.setFillColor(col_text_main)
         c.drawRightString(left_x + col_width, curr_y, clean_text(value[:25]))
         curr_y -= 14
-        
+
     # Right: Site Map
     curr_y = y - 20
     c.setFillColor(col_text_main)
     c.setFont("Helvetica-Bold", 11)
     c.drawString(right_x, curr_y, "Pages Découvertes")
     curr_y -= 18
-    
+
     pages = ai_summary.get("site_map", {}).get("pages", [])
     c.setFont("Helvetica", 9)
     c.setFillColor(col_text_main)
-    
+
     for i, page in enumerate(pages[:5]):
         display_url = page.replace("https://", "").replace("http://", "")
         if len(display_url) > 35: display_url = display_url[:32] + "..."
         c.drawString(right_x, curr_y, f"• {clean_text(display_url)}")
         curr_y -= 14
-        
+
     # Footer
     c.setFont("Helvetica", 8)
     c.setFillColor(col_text_light)
     c.drawCentredString(width/2, 20, "Généré par Relic v1.0.0 – Audit de Sécurité Automatisé")
-    
+
     c.save()
     buffer.seek(0)
     return buffer.getvalue()
 
-from dataclasses import asdict
-
 def generate_json(result: ScanResult) -> str:
     """Returns a JSON string of the scan result."""
-    # Use dataclasses.asdict and json.dumps since ScanResult is a dataclass
-    return json.dumps(asdict(result), default=str, indent=2)
+    return result.model_dump_json(indent=2)
 
 def generate_markdown(result: ScanResult) -> str:
     """Returns a Markdown report string."""
     md = f"# AuditAI Security Report\n\n"
     md += f"**Target:** {result.target}\n"
-    md += f"**Date:** {result.scanned_at.strftime('%Y-%m-%d %H:%M:%S')}\n"
+    md += f"**Date:** {result.timestamp.strftime('%Y-%m-%d %H:%M:%S')}\n"
     md += f"**Grade:** {result.grade} (Score: {result.score}/100)\n\n"
-    
+
     md += "## Vulnerability Summary\n\n"
     severity_counts = {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}
     for f in result.findings:
         if f.severity in severity_counts:
             severity_counts[f.severity] += 1
-            
+
     md += "| Severity | Count |\n|---|---|\n"
     for sev, count in severity_counts.items():
         md += f"| {sev.title()} | {count} |\n"
     md += "\n"
-    
+
     md += "## Detailed Findings\n\n"
     if not result.findings:
         md += "No vulnerabilities found.\n"
-        
+
     for f in result.findings:
         md += f"### {f.title} ({f.severity.upper()})\n"
         md += f"**Category:** {f.category}\n\n"

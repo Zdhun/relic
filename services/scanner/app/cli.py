@@ -25,7 +25,7 @@ app = typer.Typer(help="Relic - AI-Assisted Web Security Auditor CLI")
 console = Console()
 
 def print_banner():
-    banner_text = """
+    banner_text = r"""
     ____      _ _      
    |  _ \ ___| (_) ___ 
    | |_) / _ \ | |/ __|
