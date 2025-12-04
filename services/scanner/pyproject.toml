@@ -1,21 +1,25 @@
-[tool.poetry]
-name = "auditai-scanner"
-version = "0.1.0"
-description = "Scanner service for AuditAI"
-authors = ["AuditAI Team"]
+[tool.pytest.ini_options]
+minversion = "6.0"
+addopts = "-ra -q --asyncio-mode=auto"
+testpaths = [
+    "tests",
+]
+python_files = "test_*.py"
+python_classes = "Test*"
+python_functions = "test_*"
 
-[tool.poetry.dependencies]
-python = "^3.10"
-fastapi = "^0.109.0"
-uvicorn = "^0.27.0"
-pydantic = "^2.6.0"
-reportlab = "^4.0.9"
-httpx = "^0.26.0"
+[tool.coverage.run]
+branch = true
+source = ["app"]
 
-[tool.poetry.group.dev.dependencies]
-pytest = "^8.0.0"
-ruff = "^0.2.0"
-
-[build-system]
-requires = ["poetry-core"]
-build-backend = "poetry.core.masonry.api"
+[tool.coverage.report]
+show_missing = true
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "if self.debug:",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "pass",
+    "except ImportError:",
+]

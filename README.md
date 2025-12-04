@@ -25,10 +25,15 @@ Le projet est conçu comme un monorepo moderne, séparant clairement le frontend
 │       │   ├── scanner/   # Moteur de scan (engine, checks, crawler...)
 │       │   ├── ai/        # Intégration LLM (Ollama / OpenRouter)
 │       │   └── pdf/       # Générateur de rapports PDF (ReportLab)
+│       ├── tests/         # Tests Unitaires & Intégration
 │       ├── Dockerfile     # Image Docker du scanner
 │       └── requirements.txt
 ├── docker-compose.yml     # Orchestration des services (Web + Scanner)
-└── README.md
+├── README.md
+├── LICENSE
+├── SECURITY.md
+├── CONTRIBUTING.md
+└── CODE_OF_CONDUCT.md
 ```
 
 **Flux de données (Pipeline de Scan) :**
@@ -40,6 +45,34 @@ Le projet est conçu comme un monorepo moderne, séparant clairement le frontend
 3.  **Streaming** : Les logs sont envoyés en temps réel au frontend via SSE (Server-Sent Events).
 4.  **IA** : Les résultats bruts sont analysés par le LLM pour générer la synthèse.
 5.  **Output** : Un rapport PDF complet est généré et mis à disposition.
+
+---
+
+## Développement & Tests
+
+Pour garantir la qualité du code, Relic dispose d'une suite de tests complète (unitaires et intégration).
+
+### Prérequis
+- Python 3.10+
+- `virtualenv` (recommandé)
+
+### Lancer les tests
+Un script utilitaire est fourni pour simplifier l'exécution des tests et la génération du rapport de couverture :
+
+```bash
+# Depuis la racine du projet
+./run_tests.sh
+```
+
+Ce script va :
+1. Créer un environnement virtuel (`venv`) s'il n'existe pas.
+2. Installer les dépendances de développement (`requirements-dev.txt`).
+3. Lancer `pytest` avec le calcul de couverture.
+4. Générer un rapport HTML dans `htmlcov/`.
+
+### Structure des Tests
+- `services/scanner/tests/unit/` : Tests unitaires isolés (mocking intensif).
+- `services/scanner/tests/integration/` : Tests de flux complets.
 
 ---
 
@@ -56,8 +89,7 @@ C'est le point fort du projet pour l'expérience utilisateur.
 
 ### 2. Outil CLI (Command Line)
 Pour l'intégration CI/CD ou l'usage serveur.
-- **Scan "headless"** : Exécution complète sans interface graphique.
-- **Mode Interactif** : Prompt utilisateur si aucune cible n'est fournie.
+- **Scan "headless"** : Exécution complète sans interface graphique- **Mode Interactif** : Prompt utilisateur si aucune cible n'est fournie.
 - **Rapport PDF** : Génération identique à la version Web.
 
 ![CLI Scan](assets/cli_scan.png)

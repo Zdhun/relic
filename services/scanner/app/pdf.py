@@ -55,7 +55,7 @@ def generate_pdf(result: ScanResult) -> bytes:
     c.setFont("Helvetica", 12)
     c.drawString(50, y, f"Target: {result.target}")
     y -= 20
-    c.drawString(50, y, f"Date: {result.timestamp.strftime('%Y-%m-%d %H:%M:%S')}")
+    c.drawString(50, y, f"Date: {result.scanned_at.strftime('%Y-%m-%d %H:%M:%S')}")
     y -= 20
     if result.response_time_ms:
         c.drawString(50, y, f"Duration: {result.response_time_ms / 1000:.2f}s")
@@ -236,7 +236,7 @@ def generate_ai_pdf(scan_result: ScanResult, ai_summary: dict) -> bytes:
     c.setFillColor(colors.HexColor('#cbd5e1')) # Slate 300
     c.drawString(margin_x, y, f"Cible : {scan_result.target}")
     y -= 18
-    c.drawString(margin_x, y, f"Date : {scan_result.timestamp.strftime('%Y-%m-%d %H:%M')}")
+    c.drawString(margin_x, y, f"Date : {scan_result.scanned_at.strftime('%Y-%m-%d %H:%M')}")
     
     # Score Gauge (Right side of header)
     score_num = ai_summary.get("global_score", {}).get("numeric", 0)
@@ -423,15 +423,18 @@ def generate_ai_pdf(scan_result: ScanResult, ai_summary: dict) -> bytes:
     buffer.seek(0)
     return buffer.getvalue()
 
+from dataclasses import asdict
+
 def generate_json(result: ScanResult) -> str:
     """Returns a JSON string of the scan result."""
-    return result.model_dump_json(indent=2)
+    # Use dataclasses.asdict and json.dumps since ScanResult is a dataclass
+    return json.dumps(asdict(result), default=str, indent=2)
 
 def generate_markdown(result: ScanResult) -> str:
     """Returns a Markdown report string."""
     md = f"# AuditAI Security Report\n\n"
     md += f"**Target:** {result.target}\n"
-    md += f"**Date:** {result.timestamp.strftime('%Y-%m-%d %H:%M:%S')}\n"
+    md += f"**Date:** {result.scanned_at.strftime('%Y-%m-%d %H:%M:%S')}\n"
     md += f"**Grade:** {result.grade} (Score: {result.score}/100)\n\n"
     
     md += "## Vulnerability Summary\n\n"
