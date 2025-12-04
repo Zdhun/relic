@@ -30,10 +30,7 @@ Le projet est conçu comme un monorepo moderne, séparant clairement le frontend
 │       └── requirements.txt
 ├── docker-compose.yml     # Orchestration des services (Web + Scanner)
 ├── README.md
-├── LICENSE
-├── SECURITY.md
-├── CONTRIBUTING.md
-└── CODE_OF_CONDUCT.md
+└── LICENSE
 ```
 
 **Flux de données (Pipeline de Scan) :**
