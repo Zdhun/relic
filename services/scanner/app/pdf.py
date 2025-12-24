@@ -230,10 +230,18 @@ def draw_circular_score(c, x, y, score, grade, radius=30):
     c.drawCentredString(x, y - 22, f"{score}/100")
 
 def generate_ai_pdf(scan_result: ScanResult, ai_summary: dict) -> bytes:
-    """Generates a professional one-page AI security report."""
+    """
+    Generates a professional one-page AI security report.
+    
+    When ai_valid is False (AI validation failed), displays a prominent
+    warning banner indicating the report is untrusted.
+    """
     buffer = BytesIO()
     c = canvas.Canvas(buffer, pagesize=A4)
     width, height = A4
+
+    # Check if AI output was validated
+    ai_valid = ai_summary.get("ai_valid", True)
 
     # --- Professional Palette (Blue/Purple SaaS Theme) ---
     col_header_start = colors.HexColor('#1e1b4b') # Indigo 950
@@ -277,6 +285,17 @@ def generate_ai_pdf(scan_result: ScanResult, ai_summary: dict) -> bytes:
     # Reset Y for content
     y = height - header_height - 25
 
+    # --- WARNING BANNER (if AI validation failed) ---
+    if not ai_valid:
+        warning_height = 30
+        c.setFillColor(colors.HexColor('#FEF3C7'))  # Amber 100
+        c.roundRect(margin_x, y - warning_height, content_width, warning_height, 4, fill=1, stroke=0)
+        c.setFillColor(colors.HexColor('#D97706'))  # Amber 600
+        c.setFont("Helvetica-Bold", 10)
+        warning_text = "ATTENTION: Ce rapport n'a pas pu etre valide. Les donnees affichees sont indicatives uniquement."
+        c.drawCentredString(width / 2, y - 18, warning_text)
+        y -= (warning_height + 10)
+
     # Styles
     styles = getSampleStyleSheet()
     summary_style = ParagraphStyle(
@@ -287,6 +306,7 @@ def generate_ai_pdf(scan_result: ScanResult, ai_summary: dict) -> bytes:
         'Finding', parent=styles['Normal'], fontName='Helvetica', fontSize=9,
         leading=12, textColor=col_text_main, alignment=TA_JUSTIFY
     )
+
 
     # --- 2. SYNTHÈSE EXÉCUTIVE ---
     c.setFillColor(col_text_main)

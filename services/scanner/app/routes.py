@@ -9,7 +9,7 @@ from .policy import is_authorized
 from .sse import event_generator
 from .pdf import generate_pdf, generate_markdown, generate_ai_pdf
 from .ai.schema import build_ai_scan_view
-from .ai.utils import parse_ai_json
+from .ai.validation import validate_ai_report
 from .config import settings
 import json
 
@@ -390,25 +390,37 @@ Analyze this data and provide the security report in the requested JSON format.
                     yield chunk
                 
                 # After streaming is done, parse and save
-                try:
-                    analysis_result = parse_ai_json(full_response_text)
+                # Validate AI response against schema
+                analysis_result, ai_valid = validate_ai_report(
+                    full_response_text,
+                    scan_id=scan_id,
+                    model_name=model_name_str
+                )
+                
+                # Add validation flag to response
+                analysis_result["ai_valid"] = ai_valid
+                
+                # Save analysis to scan result for persistence
+                current_scan = store.get_scan(scan_id)
+                if current_scan:
+                    if not current_scan.result_json:
+                        current_scan.result_json = {}
+                    current_scan.result_json["ai_analysis"] = analysis_result
                     
-                    # Inject model name using captured variable
-                    analysis_result["model_name"] = model_name_str
-                    
-                    # Save analysis to scan result for persistence
-                    current_scan = store.get_scan(scan_id)
-                    if current_scan:
-                        if not current_scan.result_json:
-                            current_scan.result_json = {}
-                        current_scan.result_json["ai_analysis"] = analysis_result
-                        
+                    try:
                         updated_result = ScanResult(**current_scan.result_json)
                         store.save_scan_result(scan_id, updated_result)
-                        print(f"Successfully persisted AI analysis for scan {scan_id}")
-                    
-                except ValueError as e:
-                    print(f"Failed to parse/save AI response after streaming: {e}")
+                        import logging
+                        logging.getLogger(__name__).info(
+                            "Persisted AI analysis for scan %s (ai_valid=%s)",
+                            scan_id, ai_valid
+                        )
+                    except Exception as e:
+                        import logging
+                        logging.getLogger(__name__).warning(
+                            "Failed to persist AI analysis for scan %s: %s",
+                            scan_id, str(e)
+                        )
                     
             except asyncio.CancelledError:
                 print(f"Client disconnected during AI streaming for scan {scan_id}")
@@ -508,41 +520,42 @@ Analyze this data and provide the security report in the requested JSON format.
         async for chunk in response_generator:
             response_text += chunk
 
-        # Parse JSON using robust utility
+        # Validate AI response against schema
+        actual_model = settings.OLLAMA_MODEL if provider in (None, "ollama") else settings.OPENROUTER_MODEL
+        provider_name = provider or "ollama"
+        model_name_str = f"{provider_name}:{actual_model}"
+        
+        ai_summary, ai_valid = validate_ai_report(
+            response_text,
+            scan_id=scan_id,
+            model_name=model_name_str
+        )
+        ai_summary["ai_valid"] = ai_valid
+        
+        # Save analysis to scan result for persistence
+        if not scan.result_json:
+            scan.result_json = {}
+        scan.result_json["ai_analysis"] = ai_summary
+        
         try:
-            ai_summary = parse_ai_json(response_text)
-            
-            # Inject model name
-            actual_model = settings.OLLAMA_MODEL if provider == "ollama" else settings.OPENROUTER_MODEL
-            if not provider:
-                provider = "ollama"
-                actual_model = settings.OLLAMA_MODEL
-            ai_summary["model_name"] = f"{provider}:{actual_model}"
-            
-            # Save analysis to scan result for persistence
-            if not scan.result_json:
-                scan.result_json = {}
-            scan.result_json["ai_analysis"] = ai_summary
-            
-            try:
-                updated_result = ScanResult(**scan.result_json)
-                store.save_scan_result(scan_id, updated_result)
-            except Exception as e:
-                print(f"Warning: Failed to save AI analysis to DB: {e}")
-
-            # Generate PDF
-            result_obj = ScanResult(**scan.result_json)
-            pdf_bytes = generate_ai_pdf(result_obj, ai_summary)
-            
-            return Response(
-                content=pdf_bytes, 
-                media_type="application/pdf", 
-                headers={"Content-Disposition": f"attachment; filename=ai_report_{scan_id}.pdf"}
+            updated_result = ScanResult(**scan.result_json)
+            store.save_scan_result(scan_id, updated_result)
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(
+                "Failed to save AI analysis to DB for scan %s: %s",
+                scan_id, str(e)
             )
-            
-        except ValueError as e:
-            # parse_ai_json already logs the error
-            raise HTTPException(status_code=500, detail=f"AI returned invalid JSON: {str(e)}")
+
+        # Generate PDF
+        result_obj = ScanResult(**scan.result_json)
+        pdf_bytes = generate_ai_pdf(result_obj, ai_summary)
+        
+        return Response(
+            content=pdf_bytes, 
+            media_type="application/pdf", 
+            headers={"Content-Disposition": f"attachment; filename=ai_report_{scan_id}.pdf"}
+        )
 
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
