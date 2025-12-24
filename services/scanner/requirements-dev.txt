@@ -1,9 +1,8 @@
-pytest==7.4.3
-pytest-asyncio==0.21.1
-pytest-cov==4.1.0pytest<9
-pytest-asyncio
-pytest-cov
-pytest-mock
-httpx-mock
-responses
-faker==20.1.0
+# Test dependencies for scanner service
+pytest>=7.4.0,<9.0
+pytest-asyncio>=0.23.0
+pytest-cov>=4.1.0
+pytest-mock>=3.12.0
+pytest-httpx>=0.30.0
+responses>=0.24.0
+faker>=20.0.0

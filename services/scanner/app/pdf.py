@@ -129,11 +129,13 @@ def generate_pdf(result: ScanResult) -> bytes:
 
         # Meta info line
         meta_info = f"Category: {finding.category}"
-        if finding.scope:
-            meta_info += f" | Scope: {finding.scope}"
-        if finding.location:
+        scope = getattr(finding, 'scope', None)
+        location = getattr(finding, 'location', None)
+        if scope:
+            meta_info += f" | Scope: {scope}"
+        if location:
             # Truncate location if too long
-            loc = finding.location
+            loc = location
             if len(loc) > 50: loc = loc[:47] + "..."
             meta_info += f" | Loc: {loc}"
 
