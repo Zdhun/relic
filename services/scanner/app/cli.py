@@ -8,7 +8,7 @@ from .scanner.models import ScanLogEntry
 from .models import ScanResult
 from .pdf import generate_pdf, generate_json, generate_markdown, generate_ai_pdf
 from .config import settings
-from .routes import AI_REPORT_SYSTEM_PROMPT
+from .ai.prompt_loader import load_prompt
 from .ai.schema import build_ai_scan_view
 from .ai.utils import parse_ai_json
 from .ai.analyzer import analyzer
@@ -135,7 +135,7 @@ async def run_scan_async(target: str, json_out: Optional[Path], pdf_out: Optiona
                 
                 ai_view = build_ai_scan_view(ai_input)
                 
-                system_prompt = AI_REPORT_SYSTEM_PROMPT
+                system_prompt = load_prompt("security_report_system_v1")
                 user_prompt = f"Here is the scan result for {ai_input.get('target')}:\n{json.dumps(ai_view, indent=2)}\n\nAnalyze this data and provide the security report in the requested JSON format.\nIMPORTANT: Ensure all backslashes in strings are double-escaped (e.g. use '\\\\' for a literal backslash). Do not output invalid JSON escape sequences."
                 
                 response_generator = await analyzer.analyze(system_prompt, user_prompt)

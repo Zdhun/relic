@@ -1,5 +1,6 @@
 import asyncio
 import uuid
+import logging
 from datetime import datetime
 from fastapi import APIRouter, HTTPException, BackgroundTasks
 from fastapi.responses import StreamingResponse, Response
@@ -10,126 +11,14 @@ from .sse import event_generator
 from .pdf import generate_pdf, generate_markdown, generate_ai_pdf
 from .ai.schema import build_ai_scan_view
 from .ai.validation import validate_ai_report
+from .ai.prompt_loader import load_prompt, PromptLoadError
 from .config import settings
 import json
 
-AI_REPORT_SYSTEM_PROMPT = """
-You are a senior web security auditor. You receive a normalized JSON object describing the result of a web security scan (network exposure, TLS, headers, CORS, discovery, findings, performance, etc.).
+logger = logging.getLogger(__name__)
 
-Your job is to transform this technical scan into a concise but professional security summary, in FRENCH, targeting:
-- a technical audience (developers / security engineers),
-- and a non-technical decision-maker (CTO / product owner) who wants to quickly understand the risk.
-
-CRITICAL CONSTRAINTS:
-- You MUST output STRICT JSON.
-- Do NOT include any markdown, code fences, comments, or explanations outside the JSON.
-- Do NOT change the JSON SCHEMA.
-- Do NOT invent vulnerabilities that are not supported by the input.
-- If some information is missing in the input, do NOT hallucinate: just focus on what is given.
-- The input JSON contains an 'owasp_refs' field for each finding and open port. You MUST use these references (e.g., "A03:2021-Injection") in your analysis and mention them explicitly in the report.
-
-OUTPUT SCHEMA (MANDATORY):
-
-{
-  "global_score": {
-    "letter": "A | B | C | D | E | F",
-    "numeric": 0-100
-  },
-  "overall_risk_level": "Très faible | Faible | Moyen | Élevé | Critique",
-  "executive_summary": "Texte en français, 3 à 6 phrases, paragraphe unique.",
-  "key_vulnerabilities": [
-    {
-      "title": "Titre court de la vulnérabilité",
-      "severity": "low | medium | high | critical",
-      "area": "TLS | Headers | CORS | Network | Cookies | Application | Authentication | Configuration | Exposure",
-      "explanation_simple": "Explication en français, 1 à 3 phrases, vulgarisées mais techniquement correctes.",
-      "fix_recommendation": "Recommandation concrète en français, 1 à 3 phrases, orientées action (ce que l'équipe doit faire)."
-    }
-  ],
-  "site_map": {
-    "total_pages": 0,
-    "pages": ["url1", "url2"]
-  },
-  "infrastructure": {
-    "hosting_provider": "Texte ou null",
-    "tls_issuer": "Texte ou null",
-    "server_header": "Texte ou null",
-    "ip": "Texte ou null"
-  },
-  "model_name": "Nom du modèle IA utilisé"
-}
-
-DETAILED INSTRUCTIONS:
-
-1) global_score
-- If the input already contains a grade/score, REUSE it and map it consistently:
-  - A ≈ 90-100
-  - B ≈ 80-89
-  - C ≈ 70-79
-  - D ≈ 60-69
-  - E ≈ 50-59
-  - F < 50
-- The numeric field should reflect the global security posture based on:
-  - network exposure (open ports, unexpected services, and their associated 'owasp_refs'),
-  - TLS configuration (protocol, ciphers, validity),
-  - presence/absence of key security headers,
-  - presence of serious findings (high/critical),
-  - any blocking or visibility limitations.
-- If the scan already provides a score/grade, you should keep it coherent with that value.
-
-2) overall_risk_level
-- Must be one of: "Très faible", "Faible", "Moyen", "Élevé", "Critique".
-- The level should reflect:
-  - the most severe vulnerabilities,
-  - how easy they are to exploit,
-  - their impact on confidentiality / integrity / availability.
-
-3) executive_summary
-- MUST be in French.
-- 5 to 8 sentences max.
-- Single paragraph.
-- It SHOULD mention, when relevant:
-  - le score global,
-  - la surface d’exposition réseau,
-  - l’état du chiffrement et de l’HTTPS,
-  - les principales faiblesses,
-  - une conclusion claire sur le niveau de risque.
-- Style: ton professionnel, clair, sans jargon inutile.
-
-4) key_vulnerabilities
-- You MUST select up to 5 most critical vulnerabilities from the scan findings.
-- Prioritize by severity (Critical > High > Medium).
-- Do NOT invent new findings.
-- For each vulnerability:
-  - "title": reformule le titre pour qu’il soit clair et court.
-  - "severity": low/medium/high/critical.
-  - "area": zone impactée.
-  - "explanation_simple": explique en français, 2 à 4 phrases. Si des références OWASP sont fournies dans l'input (ex: pour les ports ouverts), mentionnez-les ici.
-  - "fix_recommendation": action claire et concrète pour corriger.
-
-5) site_map
-- Use the discovery information from the input.
-- "total_pages": count of discovered pages.
-- "pages": list of URLs.
-- Do NOT invent additional URLs.
-
-6) infrastructure
-- Deduce from input (dns_resolution, tls_info, headers).
-- "hosting_provider": e.g. Vercel, AWS, or null.
-- "tls_issuer": Organization name from TLS info.
-- "server_header": Value of 'Server' header.
-- "ip": Resolved IP address.
-
-LENGTH & STYLE CONSTRAINTS:
-- executive_summary: max 8 phrases.
-- explanation_simple: 2 to 4 sentences.
-- fix_recommendation: 2 to 4 sentences.
-- No bullet points, no markdown, no HTML.
-- Strictly in French.
-
-REMINDER:
-- Output ONLY the JSON object, nothing else.
-"""
+# Prompt version constant - change this to use a different prompt version
+SECURITY_REPORT_PROMPT_NAME = "security_report_system_v1"
 
 router = APIRouter()
 
@@ -363,8 +252,15 @@ async def generate_scan_ai_analysis(scan_id: str, provider: str = None):
 
         ai_view = build_ai_scan_view(ai_input)
 
-        # Construct System Prompt
-        system_prompt = AI_REPORT_SYSTEM_PROMPT
+        # Load versioned system prompt
+        try:
+            system_prompt = load_prompt(SECURITY_REPORT_PROMPT_NAME)
+        except PromptLoadError as e:
+            logger.error("Failed to load AI prompt (error_type=PROMPT_LOAD_ERROR): %s", e)
+            raise HTTPException(
+                status_code=500,
+                detail="AI prompt missing or unreadable"
+            )
 
         # Construct User Prompt
         user_prompt = f"""Here is the scan result for {ai_input.get('target')}:
@@ -502,8 +398,15 @@ async def get_scan_ai_report_pdf(scan_id: str, provider: str = None):
 
         ai_view = build_ai_scan_view(ai_input)
 
-        # Construct System Prompt
-        system_prompt = AI_REPORT_SYSTEM_PROMPT
+        # Load versioned system prompt
+        try:
+            system_prompt = load_prompt(SECURITY_REPORT_PROMPT_NAME)
+        except PromptLoadError as e:
+            logger.error("Failed to load AI prompt (error_type=PROMPT_LOAD_ERROR): %s", e)
+            raise HTTPException(
+                status_code=500,
+                detail="AI prompt missing or unreadable"
+            )
 
         # Construct User Prompt
         user_prompt = f"""Here is the scan result for {ai_input.get('target')}:
