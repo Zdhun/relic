@@ -10,7 +10,7 @@ export default function TerminalShell({ children }: { children: React.ReactNode 
                         RELIC
                     </h1>
                     <p className="text-terminal-dim text-xs mt-1 font-mono">
-                        Security Framework v1.0.0
+                        Security Framework v1.2.6
                     </p>
                 </div>
             </header>

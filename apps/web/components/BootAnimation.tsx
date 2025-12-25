@@ -212,7 +212,7 @@ export default function BootAnimation({ onComplete }: BootAnimationProps) {
                 </pre>
 
                 <div className="text-terminal-dim text-xs mb-4 text-center">
-                    Security Framework v1.0.0
+                    Security Framework v1.2.6
                 </div>
 
                 {/* Terminal output - LARGE */}
