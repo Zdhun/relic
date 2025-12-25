@@ -102,9 +102,9 @@ export default function AiAnalysisSection({ scanId, provider }: AiAnalysisSectio
                         <AlertCircle className="text-terminal-red shrink-0 mt-0.5" size={18} />
                         <div>
                             <p className="font-bold text-terminal-red text-sm">ERROR: {error}</p>
-                            {(error.includes("Ollama") || error.includes("OpenRouter") || error.includes("connect") || error.includes("API key")) && (
+                            {(error.includes("Ollama") || error.includes("Groq") || error.includes("connect") || error.includes("API key")) && (
                                 <div className="mt-2 text-xs text-terminal-dim">
-                                    <p>Check that Ollama is running or OpenRouter API key is configured.</p>
+                                    <p>Check that Ollama is running or Groq API key is configured.</p>
                                 </div>
                             )}
                         </div>

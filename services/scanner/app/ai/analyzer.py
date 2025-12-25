@@ -1,6 +1,6 @@
 import logging
 from typing import Dict, Any, Optional
-from .clients import OllamaClient, OpenRouterClient
+from .clients import OllamaClient, OpenRouterClient, GroqClient
 from ..config import settings
 
 logger = logging.getLogger(__name__)
@@ -16,11 +16,16 @@ class AiAnalyzer:
             model=settings.OPENROUTER_MODEL,
             api_key=settings.OPENROUTER_API_KEY
         )
+        self.groq_client = GroqClient(
+            model=settings.GROQ_MODEL,
+            api_key=settings.GROQ_API_KEY
+        )
 
     def get_status(self) -> Dict[str, Any]:
-        """Checks availability of both providers."""
+        """Checks availability of all providers."""
         ollama_status = self.ollama_client.is_available()
         openrouter_status = self.openrouter_client.is_available()
+        groq_status = self.groq_client.is_available()
         
         return {
             "ollama": {
@@ -32,6 +37,11 @@ class AiAnalyzer:
                 "available": openrouter_status,
                 "model": self.openrouter_client.model,
                 "configured": bool(self.openrouter_client.api_key)
+            },
+            "groq": {
+                "available": groq_status,
+                "model": self.groq_client.model,
+                "configured": bool(self.groq_client.api_key)
             }
         }
 
@@ -39,15 +49,18 @@ class AiAnalyzer:
         """
         Sends prompts to the selected AI provider.
         Returns an async generator yielding chunks of the response.
-        If provider is None, tries Ollama first, then falls back to OpenRouter.
+        If provider is None, tries Ollama first, then falls back to OpenRouter, then Groq.
         """
         if provider == "ollama":
             return self.ollama_client.chat(system_prompt, user_prompt)
         
         if provider == "openrouter":
             return self.openrouter_client.chat(system_prompt, user_prompt)
+        
+        if provider == "groq":
+            return self.groq_client.chat(system_prompt, user_prompt)
             
-        # Default behavior: Try Ollama, fallback to OpenRouter
+        # Default behavior: Try Ollama, fallback to OpenRouter, then Groq
         try:
             if self.ollama_client.is_available():
                 logger.info("Using Ollama for analysis")
@@ -56,10 +69,19 @@ class AiAnalyzer:
                 logger.warning("Ollama unavailable, falling back to OpenRouter")
         except Exception as e:
             logger.warning(f"Ollama failed: {e}. Falling back to OpenRouter")
-            
-        # Fallback
-        logger.info("Using OpenRouter for analysis")
-        return self.openrouter_client.chat(system_prompt, user_prompt)
+        
+        # Try OpenRouter
+        if self.openrouter_client.is_available():
+            logger.info("Using OpenRouter for analysis")
+            return self.openrouter_client.chat(system_prompt, user_prompt)
+        
+        # Final fallback to Groq
+        if self.groq_client.is_available():
+            logger.info("Using Groq for analysis")
+            return self.groq_client.chat(system_prompt, user_prompt)
+        
+        raise ValueError("No AI provider available. Please configure Ollama, OpenRouter, or Groq.")
 
 # Global instance
 analyzer = AiAnalyzer()
+

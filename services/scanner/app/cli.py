@@ -35,7 +35,7 @@ def print_banner():
     """
     console.print(Panel(Align.center(banner_text + "\n[bold blue]Relic - AI-Assisted Web Security Auditor[/bold blue]"), border_style="blue"))
 
-async def run_scan_async(target: str, json_out: Optional[Path], pdf_out: Optional[Path], markdown_out: Optional[Path]):
+async def run_scan_async(target: str, json_out: Optional[Path], pdf_out: Optional[Path], markdown_out: Optional[Path], provider: Optional[str] = None):
     print_banner()
     
     engine = ScanEngine()
@@ -138,7 +138,7 @@ async def run_scan_async(target: str, json_out: Optional[Path], pdf_out: Optiona
                 system_prompt = load_prompt("security_report_system_v1")
                 user_prompt = f"Here is the scan result for {ai_input.get('target')}:\n{json.dumps(ai_view, indent=2)}\n\nAnalyze this data and provide the security report in the requested JSON format.\nIMPORTANT: Ensure all backslashes in strings are double-escaped (e.g. use '\\\\' for a literal backslash). Do not output invalid JSON escape sequences."
                 
-                response_generator = await analyzer.analyze(system_prompt, user_prompt)
+                response_generator = await analyzer.analyze(system_prompt, user_prompt, provider)
                 
                 full_response = ""
                 async for chunk in response_generator:
@@ -191,6 +191,7 @@ def scan(
     json_out: Optional[Path] = typer.Option(None, "--json-out", help="Path to save JSON report"),
     pdf_out: Optional[Path] = typer.Option(None, "--pdf-out", help="Path to save PDF report"),
     markdown_out: Optional[Path] = typer.Option(None, "--markdown-out", help="Path to save Markdown report"),
+    provider: Optional[str] = typer.Option(None, "--provider", "-p", help="AI provider: ollama, openrouter, or groq"),
 ):
     """
     Run a security scan against a target.
@@ -203,7 +204,7 @@ def scan(
         print_banner()
         target = typer.prompt("Enter target URL or IP")
         
-    asyncio.run(run_scan_async(target, json_out, pdf_out, markdown_out))
+    asyncio.run(run_scan_async(target, json_out, pdf_out, markdown_out, provider))
 
 if __name__ == "__main__":
     app()

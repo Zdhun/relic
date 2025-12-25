@@ -39,14 +39,14 @@ export default function AiProviderToggle({ selectedProvider, onSelect }: AiProvi
             <div className="flex terminal-box p-1">
                 {[
                     { id: 'ollama', label: 'Ollama', sub: 'Local', icon: Cpu },
-                    { id: 'openrouter', label: 'OpenRouter', sub: 'Cloud', icon: Cloud },
+                    { id: 'groq', label: 'Groq', sub: 'Cloud', icon: Cloud },
                 ].map(({ id, label, sub, icon: Icon }) => (
                     <button
                         key={id}
                         onClick={() => onSelect(id)}
                         className={`px-4 py-2 rounded text-sm font-medium transition-all flex items-center gap-2 ${selectedProvider === id
-                                ? 'bg-terminal-accent text-terminal-bg'
-                                : 'text-terminal-dim hover:text-terminal-text hover:bg-terminal-border/30'
+                            ? 'bg-terminal-accent text-terminal-bg'
+                            : 'text-terminal-dim hover:text-terminal-text hover:bg-terminal-border/30'
                             }`}
                     >
                         <Icon size={16} />
@@ -60,7 +60,7 @@ export default function AiProviderToggle({ selectedProvider, onSelect }: AiProvi
             </div>
 
             <div className="flex gap-6 text-xs text-terminal-dim font-mono">
-                {['ollama', 'openrouter'].map((provider) => (
+                {['ollama', 'groq'].map((provider) => (
                     <div key={provider} className="flex items-center gap-2">
                         <div className={`w-2 h-2 rounded-full ${getStatusColor(provider)}`} />
                         <span className="uppercase tracking-wider">
@@ -75,3 +75,4 @@ export default function AiProviderToggle({ selectedProvider, onSelect }: AiProvi
         </div>
     );
 }
+

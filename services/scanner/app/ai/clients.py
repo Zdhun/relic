@@ -186,3 +186,86 @@ class OpenRouterClient:
         except Exception as e:
             logger.error(f"OpenRouter unexpected error: {e}")
             raise
+
+
+class GroqClient:
+    def __init__(self, model: str, api_key: str):
+        self.model = model
+        self.api_key = api_key
+        self.base_url = "https://api.groq.com/openai/v1"
+        self.timeout = 120.0
+
+    def is_available(self) -> bool:
+        """Checks if Groq is configured (API key present)."""
+        return bool(self.api_key and self.api_key.strip())
+
+    async def chat(self, system_prompt: str, user_prompt: str) -> Any:
+        """Sends a chat request to Groq."""
+        if not self.is_available():
+            raise ValueError("Groq API key is missing")
+
+        import json
+        
+        url = f"{self.base_url}/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+        payload = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ],
+            "stream": True
+        }
+
+        print("\n" + "="*50)
+        print(f"--- SYSTEM PROMPT ({self.model}) ---")
+        print(system_prompt)
+        print("-" * 20)
+        print(f"--- USER PROMPT ({self.model}) ---")
+        print(user_prompt)
+        print("="*50 + "\n")
+        print(f"--- STREAMING RESPONSE ({self.model}) ---")
+
+        try:
+            print(f"DEBUG: Starting Groq stream request to {url}")
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                async with client.stream("POST", url, headers=headers, json=payload) as response:
+                    print(f"DEBUG: Groq Response status: {response.status_code}")
+                    response.raise_for_status()
+                    
+                    buffer = b""
+                    async for chunk in response.aiter_bytes():
+                        buffer += chunk
+                        while b"\n" in buffer:
+                            line, buffer = buffer.split(b"\n", 1)
+                            line = line.strip()
+                            if not line:
+                                continue
+                            if line.startswith(b"data: "):
+                                data_str = line[6:]  # Strip "data: "
+                                if data_str.strip() == b"[DONE]":
+                                    break
+                                try:
+                                    chunk_data = json.loads(data_str)
+                                    choices = chunk_data.get("choices", [])
+                                    if choices:
+                                        delta = choices[0].get("delta", {})
+                                        content = delta.get("content", "")
+                                        if content:
+                                            print(content, end="", flush=True)
+                                            yield content
+                                except json.JSONDecodeError:
+                                    continue
+            
+            print("\n" + "="*50 + "\n")
+            return
+
+        except httpx.HTTPError as e:
+            logger.error(f"Groq HTTP error: {e}")
+            raise
+        except Exception as e:
+            logger.error(f"Groq unexpected error: {e}")
+            raise

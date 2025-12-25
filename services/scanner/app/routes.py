@@ -275,7 +275,12 @@ Analyze this data and provide the security report in the requested JSON format.
 
         # Resolve provider and model name in outer scope to avoid UnboundLocalError in closure
         resolved_provider = provider if provider else "ollama"
-        resolved_model = settings.OLLAMA_MODEL if resolved_provider == "ollama" else settings.OPENROUTER_MODEL
+        if resolved_provider == "ollama":
+            resolved_model = settings.OLLAMA_MODEL
+        elif resolved_provider == "groq":
+            resolved_model = settings.GROQ_MODEL
+        else:
+            resolved_model = settings.OPENROUTER_MODEL
         model_name_str = f"{resolved_provider}:{resolved_model}"
 
         async def stream_and_persist():
@@ -424,8 +429,13 @@ Analyze this data and provide the security report in the requested JSON format.
             response_text += chunk
 
         # Validate AI response against schema
-        actual_model = settings.OLLAMA_MODEL if provider in (None, "ollama") else settings.OPENROUTER_MODEL
         provider_name = provider or "ollama"
+        if provider_name == "ollama":
+            actual_model = settings.OLLAMA_MODEL
+        elif provider_name == "groq":
+            actual_model = settings.GROQ_MODEL
+        else:
+            actual_model = settings.OPENROUTER_MODEL
         model_name_str = f"{provider_name}:{actual_model}"
         
         ai_summary, ai_valid = validate_ai_report(
