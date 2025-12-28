@@ -5,7 +5,16 @@ from sqlmodel import Field, SQLModel, JSON
 import uuid
 
 class ScanRequest(BaseModel):
+    """
+    Request model for initiating a security scan.
+    
+    Attributes:
+        target: URL or hostname to scan
+        authorized: User acknowledgement that they have permission to scan the target.
+                    This field is REQUIRED and must be True for the scan to proceed.
+    """
     target: str
+    authorized: bool = False  # Default to False to require explicit acknowledgement
 
 class ScanLog(BaseModel):
     timestamp: datetime

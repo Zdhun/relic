@@ -1,4 +1,7 @@
-
+# Relic / AuditAI - Docker Compose Configuration
+# ================================================
+# Run with: docker compose up
+# See .env.example for all available environment variables.
 
 services:
   web:
@@ -20,9 +23,11 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - GROQ_API_KEY=${GROQ_API_KEY}
-      - GROQ_MODEL=${GROQ_MODEL:-openai/gpt-oss-20b}
+      # AI Providers
+      - GROQ_API_KEY=${GROQ_API_KEY:-}
+      - GROQ_MODEL=${GROQ_MODEL:-llama-3.3-70b-versatile}
       - OLLAMA_BASE_URL=http://host.docker.internal:11434
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-gpt-oss:20b}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     networks:

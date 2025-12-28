@@ -6,6 +6,36 @@ Ce projet est un prototype fonctionnel réalisé dans le cadre d'un test techniq
 
 ---
 
+## ⚠️ Safety & Scope
+
+**Relic est un scanner de sécurité pour tests autorisés uniquement.**
+
+### Avertissement Légal
+
+- **Le scan non autorisé est illégal** dans la plupart des juridictions
+- Vous devez avoir la **permission explicite** du propriétaire avant de scanner
+- Cet outil est destiné aux **tests de sécurité autorisés** et à la démonstration portfolio
+- Un usage abusif peut entraîner des **poursuites pénales**
+
+### Confirmation Obligatoire
+
+Avant chaque scan, l'utilisateur doit **confirmer qu'il a l'autorisation** de tester la cible.
+
+**CLI:** Confirmation interactive requise :
+```bash
+# Mode interactif (nécessite de taper YES)
+relic scan https://example.com
+
+# Mode automation (pour CI/CD)
+relic scan https://example.com --authorized
+```
+
+**Web UI:** Une popup modale avec checkbox apparaît avant chaque scan.
+
+> **Note:** Vous pouvez scanner n'importe quelle URL (publique ou privée). La seule exigence est de confirmer que vous avez le droit de le faire.
+
+---
+
 ## Architecture & Structure du Projet
 
 Le projet est conçu comme un monorepo moderne, séparant clairement le frontend, le backend et l'infrastructure.
@@ -23,7 +53,7 @@ Le projet est conçu comme un monorepo moderne, séparant clairement le frontend
 │       │   ├── cli.py     # Point d'entrée CLI (Command Line Interface)
 │       │   ├── main.py    # Point d'entrée API (FastAPI)
 │       │   ├── scanner/   # Moteur de scan (engine, checks, crawler...)
-│       │   ├── ai/        # Intégration LLM (Ollama / OpenRouter)
+│       │   ├── ai/        # Intégration LLM (Ollama / Groq)
 │       │   └── pdf/       # Générateur de rapports PDF (ReportLab)
 │       ├── tests/         # Tests Unitaires & Intégration
 │       ├── Dockerfile     # Image Docker du scanner
@@ -237,15 +267,32 @@ docker compose cp scanner:/app/report.pdf ./report.pdf
 ## Configuration
 
 Le projet est "batteries included". Les valeurs par défaut sont optimisées pour un usage standard.
-Vous pouvez surcharger ces variables dans le `docker-compose.yml` :
+Vous pouvez surcharger ces variables via `.env` ou `docker-compose.yml` :
+
+### AI Providers
 
 | Variable | Description | Valeur par défaut |
 |----------|-------------|-------------------|
-| `OLLAMA_BASE_URL` | URL de l'instance Ollama (pour IA locale) | `http://localhost:11434` |
+| `OLLAMA_BASE_URL` | URL de l'instance Ollama (IA locale) | `http://localhost:11434` |
 | `OLLAMA_MODEL` | Modèle Ollama à utiliser | `gpt-oss:20b` |
-| `OPENROUTER_API_KEY` | Clé API pour OpenRouter (si pas d'Ollama) | *Vide* |
-| `OPENROUTER_MODEL` | Modèle OpenRouter à utiliser | `x-ai/grok-4.1-fast:free` |
+| `GROQ_API_KEY` | Clé API Groq (provider cloud) | *Vide* |
+| `GROQ_MODEL` | Modèle Groq à utiliser | `llama-3.3-70b-versatile` |
+
+### Scanner Settings
+
+| Variable | Description | Valeur par défaut |
+|----------|-------------|-------------------|
 | `SCANNER_DEFAULT_TIMEOUT` | Timeout HTTP global (secondes) | `10.0` |
+| `SCANNER_MAX_CRAWL_URLS` | Max URLs à crawler | `20` |
+| `SCANNER_RATE_LIMIT_DELAY` | Délai entre requêtes (secondes) | `0.3` |
+
+### AI Provider Priority
+
+Relic essaie les providers dans cet ordre :
+1. **Ollama** (local, recommandé pour la confidentialité)
+2. **Groq** (cloud, si la clé API est configurée)
+
+Si aucun provider n'est disponible, le scan fonctionne mais sans analyse IA.
 
 ### Recommandations Matérielles (IA Locale)
 
@@ -262,7 +309,7 @@ L'utilisation d'Ollama en local dépend fortement de votre GPU/RAM. Voici un gui
 
 > **⚠️ Important** : Pour un rapport de sécurité pertinent, nous recommandons au minimum un modèle **7B ou 8B** (Mistral, Llama3). Les modèles plus petits (TinyLlama, Phi-2) "hallucinent" trop souvent des vulnérabilités ou ratent le contexte.
 >
-> **Si votre matériel est insuffisant** : Configurez `OPENROUTER_API_KEY` pour utiliser un modèle Cloud performant sans ralentir votre machine.
+> **Si votre matériel est insuffisant** : Configurez `GROQ_API_KEY` pour utiliser un modèle Cloud performant sans ralentir votre machine.
 
 ---
 

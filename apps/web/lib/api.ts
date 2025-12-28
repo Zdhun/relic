@@ -2,13 +2,46 @@ import { ScanResult } from "./types";
 
 const BASE_URL = "/api/scan";
 
-export async function startScan(target: string): Promise<{ scan_id: string }> {
+/**
+ * Error response from the API when policy check fails.
+ */
+export interface PolicyError {
+    error_code: string;
+    message: string;
+    details?: Record<string, any>;
+}
+
+/**
+ * Start a security scan against a target.
+ * 
+ * @param target - URL or hostname to scan
+ * @param authorized - User acknowledgement that they have permission to scan
+ * @returns Object with scan_id if successful
+ * @throws Error with detailed message if policy check fails
+ */
+export async function startScan(target: string, authorized: boolean = false): Promise<{ scan_id: string }> {
     const res = await fetch(`${BASE_URL}/start`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ target }),
+        body: JSON.stringify({ target, authorized }),
     });
-    if (!res.ok) throw new Error("Failed to start scan");
+
+    if (!res.ok) {
+        // Try to parse structured error response
+        try {
+            const errorData: PolicyError = await res.json();
+            if (errorData.error_code) {
+                throw new Error(`${errorData.error_code}: ${errorData.message}`);
+            }
+            throw new Error(errorData.message || "Failed to start scan");
+        } catch (e) {
+            if (e instanceof Error && e.message.includes("error_code")) {
+                throw e; // Re-throw structured error
+            }
+            throw new Error("Failed to start scan");
+        }
+    }
+
     return res.json();
 }
 

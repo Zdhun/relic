@@ -1,6 +1,13 @@
+"""
+Relic CLI - Security Scanner Command Line Interface
+====================================================
+AI-Assisted Web Security Auditor with authorization controls.
+"""
+
 import typer
 import asyncio
 import os
+import sys
 from typing import Optional
 from pathlib import Path
 from .scanner.engine import ScanEngine
@@ -20,20 +27,71 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich import print as rprint
 from rich.layout import Layout
 from rich.align import Align
+from rich.prompt import Prompt, Confirm
 
 app = typer.Typer(help="Relic - AI-Assisted Web Security Auditor CLI")
 console = Console()
 
+# Authorization warning message
+AUTHORIZATION_WARNING = """
+[bold red]⚠️  AUTHORIZATION REQUIRED[/bold red]
+
+You are about to perform a security scan on:
+  [bold cyan]{target}[/bold cyan]
+
+[bold yellow]IMPORTANT LEGAL NOTICE:[/bold yellow]
+• Unauthorized scanning of systems is ILLEGAL in most jurisdictions.
+• You must have EXPLICIT PERMISSION from the target owner.
+• This tool is for AUTHORIZED SECURITY TESTING ONLY.
+• Misuse may result in criminal prosecution.
+
+[dim]By continuing, you confirm that you have authorization to scan this target.[/dim]
+"""
+
+
 def print_banner():
-    banner_text = r"""
-    ____      _ _      
-   |  _ \ ___| (_) ___ 
-   | |_) / _ \ | |/ __|
-   |  _ <  __/ | | (__ 
-   |_| \_\___|_|_|\___|
-                       
+    banner_text = """
+[red]██████╗ ███████╗██╗     ██╗ ██████╗[/red]
+[red]██╔══██╗██╔════╝██║     ██║██╔════╝[/red]
+[red]██████╔╝█████╗  ██║     ██║██║     [/red]
+[red]██╔══██╗██╔══╝  ██║     ██║██║     [/red]
+[red]██║  ██║███████╗███████╗██║╚██████╗[/red]
+[red]╚═╝  ╚═╝╚══════╝╚══════╝╚═╝ ╚═════╝[/red]
     """
-    console.print(Panel(Align.center(banner_text + "\n[bold blue]Relic - AI-Assisted Web Security Auditor[/bold blue]"), border_style="blue"))
+    console.print(Panel(Align.center(banner_text + "\n[bold cyan]AI-Assisted Web Security Auditor[/bold cyan]"), border_style="red"))
+
+
+def check_authorization(target: str, authorized_flag: bool) -> bool:
+    """
+    Check if user has acknowledged authorization.
+    
+    Args:
+        target: Target URL/hostname
+        authorized_flag: If True, skip interactive prompt (for automation)
+        
+    Returns:
+        True if authorized, False if user declines
+    """
+    if authorized_flag:
+        console.print("[dim]Authorization flag provided, skipping confirmation...[/dim]")
+        return True
+    
+    # Show warning
+    console.print(AUTHORIZATION_WARNING.format(target=target))
+    
+    # Require exact "YES" input
+    response = Prompt.ask(
+        "\n[bold]Type 'YES' to confirm authorization[/bold]",
+        default=""
+    )
+    
+    if response.strip() == "YES":
+        console.print("[green]✓ Authorization confirmed[/green]\n")
+        return True
+    else:
+        console.print("[red]✗ Scan cancelled. Authorization not confirmed.[/red]")
+        return False
+
 
 async def run_scan_async(target: str, json_out: Optional[Path], pdf_out: Optional[Path], markdown_out: Optional[Path], provider: Optional[str] = None):
     print_banner()
@@ -44,13 +102,10 @@ async def run_scan_async(target: str, json_out: Optional[Path], pdf_out: Optiona
     console.print("[dim]Initializing scan engine...[/dim]\n")
     
     async def log_callback(entry: ScanLogEntry):
-        # We can keep it quiet or show verbose logs if a flag is passed.
-        # For a clean UI, let's only show INFO/WARNING/ERROR with rich markup
         if entry.level == "ERROR":
             console.print(f"[red][ERROR][/red] {entry.message}")
         elif entry.level == "WARNING":
             console.print(f"[yellow][WARN][/yellow]  {entry.message}")
-        # Skip INFO for cleaner output unless verbose (not implemented yet)
 
     try:
         with Progress(
@@ -84,7 +139,7 @@ async def run_scan_async(target: str, json_out: Optional[Path], pdf_out: Optiona
         ]
         
         result = ScanResult(
-            scan_id="cli-scan", # Placeholder
+            scan_id="cli-scan",
             target=result_dataclass.target,
             status="done",
             score=result_dataclass.score,
@@ -180,10 +235,12 @@ async def run_scan_async(target: str, json_out: Optional[Path], pdf_out: Optiona
         console.print(f"[bold red]Scan failed:[/bold red] {e}")
         raise typer.Exit(code=1)
 
+
 def get_grade_color(grade):
     if grade in ["A", "B"]: return "green"
     if grade in ["C", "D"]: return "yellow"
     return "red"
+
 
 @app.command()
 def scan(
@@ -191,10 +248,21 @@ def scan(
     json_out: Optional[Path] = typer.Option(None, "--json-out", help="Path to save JSON report"),
     pdf_out: Optional[Path] = typer.Option(None, "--pdf-out", help="Path to save PDF report"),
     markdown_out: Optional[Path] = typer.Option(None, "--markdown-out", help="Path to save Markdown report"),
-    provider: Optional[str] = typer.Option(None, "--provider", "-p", help="AI provider: ollama, openrouter, or groq"),
+    provider: Optional[str] = typer.Option(None, "--provider", "-p", help="AI provider: ollama or groq"),
+    authorized: bool = typer.Option(False, "--authorized", "--i-own-this", help="Skip authorization prompt (for automation). Use only if you have permission to scan the target."),
 ):
     """
     Run a security scan against a target.
+    
+    By default, requires interactive confirmation that you have authorization
+    to scan the target. Use --authorized flag to skip for automation.
+    
+    Examples:
+        # Interactive scan (requires typing YES)
+        relic scan https://example.com
+        
+        # Automated scan (CI/CD)
+        relic scan https://example.com --authorized --pdf-out report.pdf
     """
     # Workaround for typer sometimes capturing the command name as argument
     if target == "scan":
@@ -203,8 +271,13 @@ def scan(
     if not target:
         print_banner()
         target = typer.prompt("Enter target URL or IP")
-        
+    
+    # Check authorization (just confirmation, any URL allowed)
+    if not check_authorization(target, authorized):
+        raise typer.Exit(code=0)  # User cancelled, not an error
+    
     asyncio.run(run_scan_async(target, json_out, pdf_out, markdown_out, provider))
+
 
 if __name__ == "__main__":
     app()

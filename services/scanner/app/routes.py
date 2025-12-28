@@ -6,7 +6,7 @@ from fastapi import APIRouter, HTTPException, BackgroundTasks
 from fastapi.responses import StreamingResponse, Response
 from .models import ScanRequest, ScanResponse, ScanResult, ScanLog, Finding
 from . import store
-from .policy import is_authorized
+from .policy import validate_scan_request, PolicyError
 from .sse import event_generator
 from .pdf import generate_pdf, generate_markdown, generate_ai_pdf
 from .ai.schema import build_ai_scan_view
@@ -94,10 +94,33 @@ async def run_scan_task(scan_id: str, target: str):
         print(f"Scan failed: {e}")
         store.fail_scan(scan_id, str(e))
 
+from fastapi.responses import JSONResponse
+
 @router.post("/scan", response_model=ScanResponse)
 async def start_scan(request: ScanRequest, background_tasks: BackgroundTasks):
-    if not is_authorized(request.target):
-        raise HTTPException(status_code=403, detail="Target not authorized (Localhost/Private only)")
+    """
+    Start a security scan against a target.
+    
+    Requires:
+    - authorized: true (user acknowledgement of permission to scan)
+    - target: valid http/https URL
+    
+    Returns:
+    - 200: Scan started, returns scan_id
+    - 400: Missing authorization acknowledgement or invalid URL
+    """
+    # Validate request (acknowledgement + valid URL format)
+    policy_result = validate_scan_request(request.target, request.authorized)
+    
+    if not policy_result.allowed:
+        return JSONResponse(
+            status_code=400,
+            content={
+                "error_code": policy_result.error_code.value,
+                "message": policy_result.message,
+                "details": policy_result.details
+            }
+        )
 
     # Create scan in DB
     scan = store.create_scan(request.target)
