@@ -3,6 +3,9 @@
     "globalDependencies": [
         "**/.env.*local"
     ],
+    "globalEnv": [
+        "SCANNER_BASE_URL"
+    ],
     "tasks": {
         "build": {
             "dependsOn": [
