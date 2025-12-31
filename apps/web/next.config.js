@@ -1,6 +1,12 @@
 /** @type {import('next').NextConfig} */
+const path = require('path');
+
 const nextConfig = {
     output: 'standalone',
+    // Required for pnpm monorepos - tells Next.js where the root is for dependency tracing
+    experimental: {
+        outputFileTracingRoot: path.join(__dirname, '../../'),
+    },
     async rewrites() {
         // For local development, use 127.0.0.1:8000
         // For Docker, SCANNER_BASE_URL will be set to http://scanner:8000
